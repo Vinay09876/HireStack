@@ -1,0 +1,7 @@
+{
+  "name": "HireStack",
+  "description": "A job search platform aggregating tech job listings from top IT companies like Google, Microsoft, Meta, Amazon, Apple, and Netflix.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
