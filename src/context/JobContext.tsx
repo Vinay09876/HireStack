@@ -1,17 +1,19 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { mockCompanies, mockJobs } from '../data/mockData';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { Company, Job, UserProfile } from '../types';
 
 interface AuthUser {
+  id: string;
   name: string;
   email: string;
   title: string;
-  avatarUrl?: string;
 }
 
 interface JobContextType {
   jobs: Job[];
   companies: Company[];
+  loading: boolean;
   savedJobIds: string[];
   toggleSaveJob: (id: string) => void;
   isJobSaved: (id: string) => boolean;
@@ -22,98 +24,179 @@ interface JobContextType {
   userProfile: UserProfile;
   updateUserProfile: (profile: Partial<UserProfile>) => void;
   currentUser: AuthUser | null;
-  login: (email: string, name?: string) => void;
+  signUp: (email: string, password: string, name: string) => Promise<{ error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signInWithGoogle: () => Promise<{ error?: string }>;
+  resetPassword: (email: string) => Promise<{ error?: string }>;
   logout: () => void;
 }
 
-const defaultProfile: UserProfile = {
-  name: 'Vinay Ippalayala',
-  email: 'vinay.ippalayala@hirestack.dev',
-  title: 'Senior Software Engineer',
-  preferredRoles: ['Software Engineer', 'Frontend Developer', 'Distributed Systems'],
-  preferredLocations: ['Mountain View, CA', 'San Francisco, CA', 'Remote'],
-  bio: 'Passionate full-stack & distributed systems engineer looking for high-impact roles at top-tier tech engineering teams.',
+const emptyProfile: UserProfile = {
+  name: '',
+  email: '',
+  title: '',
+  preferredRoles: [],
+  preferredLocations: [],
+  bio: '',
   notificationsEnabled: true,
 };
+
+function mapCompanyRow(row: any): Company {
+  return {
+    id: row.id,
+    name: row.name,
+    logoUrl: row.logo_url,
+    about: row.about,
+    websiteUrl: row.website_url,
+    headquarters: row.headquarters,
+    founded: row.founded,
+    employees: row.employees,
+    bannerGradient: row.banner_gradient,
+  };
+}
+
+function mapJobRow(row: any, companyById: Map<string, Company>): Job {
+  const company = companyById.get(row.company_id);
+  return {
+    id: row.id,
+    title: row.title,
+    companyId: row.company_id,
+    companyName: company?.name || row.company_id,
+    companyLogo: company?.logoUrl || '',
+    location: row.location,
+    jobType: row.job_type,
+    experienceLevel: row.experience_level,
+    description: row.description,
+    responsibilities: row.responsibilities || [],
+    requirements: row.requirements || [],
+    qualifications: row.qualifications || [],
+    salaryRange: row.salary_range,
+    applicationUrl: row.application_url,
+    postedDate: row.posted_date,
+    isActive: row.is_active,
+    department: row.department,
+    isRemote: row.is_remote,
+  };
+}
+
+function mapProfileRow(row: any): UserProfile {
+  return {
+    name: row.name || '',
+    email: row.email || '',
+    title: row.title || '',
+    preferredRoles: row.preferred_roles || [],
+    preferredLocations: row.preferred_locations || [],
+    bio: row.bio || '',
+    notificationsEnabled: row.notifications_enabled ?? true,
+  };
+}
 
 const JobContext = createContext<JobContextType | undefined>(undefined);
 
 export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [jobs] = useState<Job[]>(mockJobs);
-  const [companies] = useState<Company[]>(mockCompanies);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Initialize saved jobs from localStorage (empty by default for a new visitor)
-  const [savedJobIds, setSavedJobIds] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hirestack_saved_ids');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          return [];
-        }
-      }
-    }
-    return [];
-  });
+  const [savedJobIds, setSavedJobIds] = useState<string[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile>(emptyProfile);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
 
-  // User Profile
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hirestack_profile');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          return defaultProfile;
-        }
-      }
-    }
-    return defaultProfile;
-  });
+  // Load public job/company data once on mount
+  useEffect(() => {
+    (async () => {
+      const [{ data: companyRows, error: companyError }, { data: jobRows, error: jobError }] =
+        await Promise.all([
+          supabase.from('companies').select('*'),
+          supabase.from('jobs').select('*').eq('is_active', true),
+        ]);
 
-  // Auth User (starts logged out; login() sets this after a real sign-in)
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hirestack_auth');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          return null;
-        }
-      }
-    }
-    return null;
-  });
+      if (companyError) console.error('Failed to load companies:', companyError.message);
+      if (jobError) console.error('Failed to load jobs:', jobError.message);
+
+      const mappedCompanies = (companyRows || []).map(mapCompanyRow);
+      const companyById = new Map(mappedCompanies.map((c) => [c.id, c]));
+      const mappedJobs = (jobRows || []).map((row) => mapJobRow(row, companyById));
+
+      setCompanies(mappedCompanies);
+      setJobs(mappedJobs);
+      setLoading(false);
+    })();
+  }, []);
+
+  // Load the user's saved jobs + profile whenever their session changes
+  const loadUserData = useCallback(async (userId: string) => {
+    const [{ data: savedRows }, { data: profileRow }] = await Promise.all([
+      supabase.from('saved_jobs').select('job_id').eq('user_id', userId),
+      supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+    ]);
+
+    setSavedJobIds((savedRows || []).map((r: any) => r.job_id));
+    if (profileRow) setUserProfile(mapProfileRow(profileRow));
+  }, []);
+
+  // Auth session bootstrap + listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('hirestack_saved_ids', JSON.stringify(savedJobIds));
-  }, [savedJobIds]);
-
-  useEffect(() => {
-    localStorage.setItem('hirestack_profile', JSON.stringify(userProfile));
-  }, [userProfile]);
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('hirestack_auth', JSON.stringify(currentUser));
+    const user = session?.user;
+    if (user) {
+      setCurrentUser({
+        id: user.id,
+        name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+        email: user.email || '',
+        title: 'Tech Professional',
+      });
+      loadUserData(user.id);
     } else {
-      localStorage.removeItem('hirestack_auth');
+      setCurrentUser(null);
+      setSavedJobIds([]);
+      setUserProfile(emptyProfile);
     }
-  }, [currentUser]);
+  }, [session, loadUserData]);
 
-  const toggleSaveJob = (id: string) => {
-    setSavedJobIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
+  const toggleSaveJob = async (id: string) => {
+    if (!currentUser) return;
+    const isSaved = savedJobIds.includes(id);
+
+    // Optimistic update
+    setSavedJobIds((prev) => (isSaved ? prev.filter((item) => item !== id) : [...prev, id]));
+
+    if (isSaved) {
+      const { error } = await supabase
+        .from('saved_jobs')
+        .delete()
+        .eq('user_id', currentUser.id)
+        .eq('job_id', id);
+      if (error) {
+        console.error('Failed to unsave job:', error.message);
+        setSavedJobIds((prev) => [...prev, id]);
+      }
+    } else {
+      const { error } = await supabase
+        .from('saved_jobs')
+        .insert({ user_id: currentUser.id, job_id: id });
+      if (error) {
+        console.error('Failed to save job:', error.message);
+        setSavedJobIds((prev) => prev.filter((item) => item !== id));
+      }
+    }
   };
 
   const isJobSaved = (id: string) => savedJobIds.includes(id);
 
-  const getSavedJobs = () => {
-    return jobs.filter((j) => savedJobIds.includes(j.id));
-  };
+  const getSavedJobs = () => jobs.filter((j) => savedJobIds.includes(j.id));
 
   const getJobById = (id: string) => jobs.find((j) => j.id === id);
 
@@ -122,34 +205,62 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getJobsByCompany = (companyId: string) =>
     jobs.filter((j) => j.companyId.toLowerCase() === companyId.toLowerCase());
 
-  const updateUserProfile = (updated: Partial<UserProfile>) => {
-    setUserProfile((prev) => {
-      const next = { ...prev, ...updated };
-      if (currentUser && (updated.name || updated.email || updated.title)) {
-        setCurrentUser((u) => u ? {
-          ...u,
-          name: updated.name || u.name,
-          email: updated.email || u.email,
-          title: updated.title || u.title
-        } : null);
-      }
-      return next;
-    });
+  const updateUserProfile = async (updated: Partial<UserProfile>) => {
+    if (!currentUser) return;
+    setUserProfile((prev) => ({ ...prev, ...updated }));
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        ...(updated.name !== undefined && { name: updated.name }),
+        ...(updated.email !== undefined && { email: updated.email }),
+        ...(updated.title !== undefined && { title: updated.title }),
+        ...(updated.preferredRoles !== undefined && { preferred_roles: updated.preferredRoles }),
+        ...(updated.preferredLocations !== undefined && {
+          preferred_locations: updated.preferredLocations,
+        }),
+        ...(updated.bio !== undefined && { bio: updated.bio }),
+        ...(updated.notificationsEnabled !== undefined && {
+          notifications_enabled: updated.notificationsEnabled,
+        }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', currentUser.id);
+
+    if (error) console.error('Failed to update profile:', error.message);
   };
 
-  const login = (email: string, name?: string) => {
-    const formattedName = name || email.split('@')[0].replace('.', ' ').replace(/^./, (str) => str.toUpperCase());
-    const user: AuthUser = {
-      name: formattedName,
+  const signUp = async (email: string, password: string, name: string) => {
+    const { error } = await supabase.auth.signUp({
       email,
-      title: 'Tech Professional',
-    };
-    setCurrentUser(user);
-    updateUserProfile({ name: user.name, email: user.email });
+      password,
+      options: { data: { full_name: name } },
+    });
+    return { error: error?.message };
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return { error: error?.message };
+  };
+
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/` },
+    });
+    return { error: error?.message };
+  };
+
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
+    return { error: error?.message };
   };
 
   const logout = () => {
-    setCurrentUser(null);
+    supabase.auth.signOut();
   };
 
   return (
@@ -157,6 +268,7 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         jobs,
         companies,
+        loading,
         savedJobIds,
         toggleSaveJob,
         isJobSaved,
@@ -167,7 +279,10 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         userProfile,
         updateUserProfile,
         currentUser,
-        login,
+        signUp,
+        signIn,
+        signInWithGoogle,
+        resetPassword,
         logout,
       }}
     >

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Briefcase, Mail, Lock, User, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { useJob } from '../context/JobContext';
@@ -15,33 +15,67 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const { login } = useJob();
+  const { signUp, signIn, signInWithGoogle, resetPassword, currentUser } = useJob();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state as { from?: Location })?.from?.pathname || '/dashboard';
+  const redirectTo = (location.state as { from?: Location })?.from?.pathname || '/';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Covers OAuth (Google) sign-in: Supabase completes the redirect back to this
+  // page itself, so once a session exists we navigate away from here ourselves.
+  useEffect(() => {
+    if (currentUser) {
+      navigate(redirectTo, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+
     if (!email || !password) {
       setError('Please fill in all required fields.');
       return;
     }
+    if (!isLogin && !name.trim()) {
+      setError('Please enter your full name.');
+      return;
+    }
 
     setLoading(true);
-    setTimeout(() => {
-      login(email, isLogin ? undefined : name);
-      setLoading(false);
-      navigate(redirectTo, { replace: true });
-    }, 400);
+    const result = isLogin
+      ? await signIn(email, password)
+      : await signUp(email, password, name.trim());
+    setLoading(false);
+
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+
+    navigate(redirectTo, { replace: true });
   };
 
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = async () => {
     setLoading(true);
-    setTimeout(() => {
-      login('vinay.ippalayala@hirestack.dev', 'Vinay Ippalayala');
+    const result = await signInWithGoogle();
+    if (result.error) {
       setLoading(false);
-      navigate(redirectTo, { replace: true });
-    }, 400);
+      setError(result.error);
+    }
+    // On success, Supabase redirects the browser to Google, so no further action here.
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Enter your email above first, then click "Forgot password?".');
+      return;
+    }
+    const result = await resetPassword(email);
+    setError(result.error || '');
+    if (!result.error) {
+      alert(`Password reset email sent to ${email}.`);
+    }
   };
 
   return (
@@ -159,7 +193,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
                 {isLogin && (
                   <button
                     type="button"
-                    onClick={() => alert('Demo environment: password reset email simulated.')}
+                    onClick={handleForgotPassword}
                     className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
                   >
                     Forgot password?

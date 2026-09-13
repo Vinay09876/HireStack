@@ -22,7 +22,7 @@ const ITEMS_PER_PAGE = 5;
 type SortOption = 'recent' | 'relevance' | 'salary';
 
 export const JobsPage: React.FC = () => {
-  const { jobs } = useJob();
+  const { jobs, loading } = useJob();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Mobile filters drawer open state
@@ -261,7 +261,11 @@ export const JobsPage: React.FC = () => {
             </div>
 
             {/* List of Job Cards */}
-            {paginatedJobs.length > 0 ? (
+            {loading ? (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                Loading jobs...
+              </div>
+            ) : paginatedJobs.length > 0 ? (
               <div className="space-y-3.5">
                 {paginatedJobs.map((job) => (
                   <JobCard key={job.id} job={job} variant="list" />

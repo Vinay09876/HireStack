@@ -17,7 +17,7 @@ import { CompanyLogo } from '../components/CompanyLogo';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { jobs, companies } = useJob();
+  const { jobs, companies, loading } = useJob();
 
   const [keyword, setKeyword] = useState('');
   const [location, setLocation] = useState('');
@@ -228,11 +228,17 @@ export const HomePage: React.FC = () => {
         </div>
 
         {/* 3 Columns Desktop, 1 Column Mobile */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {featuredJobs.map((job) => (
-            <JobCard key={job.id} job={job} variant="grid" />
-          ))}
-        </div>
+        {loading ? (
+          <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+            Loading jobs...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {featuredJobs.map((job) => (
+              <JobCard key={job.id} job={job} variant="grid" />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* DIRECT REDIRECT ASSURANCE BANNER */}
