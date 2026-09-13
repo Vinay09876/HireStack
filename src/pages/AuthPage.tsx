@@ -145,7 +145,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  placeholder="alex.morgan@hirestack.dev"
+                  placeholder="example@gmail.com"
                   className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/30"
                 />
               </div>
