@@ -106,18 +106,30 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Load public job/company data once on mount
   useEffect(() => {
     (async () => {
-      const [{ data: companyRows, error: companyError }, { data: jobRows, error: jobError }] =
-        await Promise.all([
-          supabase.from('companies').select('*'),
-          supabase.from('jobs').select('*').eq('is_active', true),
-        ]);
-
+      const { data: companyRows, error: companyError } = await supabase.from('companies').select('*');
       if (companyError) console.error('Failed to load companies:', companyError.message);
-      if (jobError) console.error('Failed to load jobs:', jobError.message);
+
+      // Supabase caps a single select() at 1000 rows, so page through
+      // all active jobs rather than silently truncating the result.
+      const PAGE_SIZE = 1000;
+      const jobRows: any[] = [];
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from('jobs')
+          .select('*')
+          .eq('is_active', true)
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) {
+          console.error('Failed to load jobs:', error.message);
+          break;
+        }
+        jobRows.push(...(data || []));
+        if (!data || data.length < PAGE_SIZE) break;
+      }
 
       const mappedCompanies = (companyRows || []).map(mapCompanyRow);
       const companyById = new Map(mappedCompanies.map((c) => [c.id, c]));
-      const mappedJobs = (jobRows || []).map((row) => mapJobRow(row, companyById));
+      const mappedJobs = jobRows.map((row) => mapJobRow(row, companyById));
 
       setCompanies(mappedCompanies);
       setJobs(mappedJobs);

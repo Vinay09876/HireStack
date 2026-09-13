@@ -10,6 +10,7 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useJob } from '../context/JobContext';
 import { ExperienceLevel, FilterState, Job, JobType } from '../types';
@@ -17,7 +18,7 @@ import { JobCard } from '../components/JobCard';
 import { FilterSidebar } from '../components/FilterSidebar';
 import { getDaysAgo } from '../utils/date';
 
-const ITEMS_PER_PAGE = 5;
+const ITEMS_PER_PAGE = 20;
 
 type SortOption = 'recent' | 'relevance' | 'salary';
 
@@ -160,6 +161,26 @@ export const JobsPage: React.FC = () => {
     return sortedJobs.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [sortedJobs, currentPage]);
 
+  // Windowed page list: first page, last page, current page ± 1, with
+  // '...' gaps elsewhere, so the pagination bar stays a fixed, wrappable width
+  // regardless of how many total pages exist.
+  const paginationItems = useMemo(() => {
+    const items: (number | 'ellipsis')[] = [];
+    const addPage = (p: number) => items.push(p);
+
+    addPage(1);
+    if (currentPage > 3) items.push('ellipsis');
+
+    for (let p = Math.max(2, currentPage - 1); p <= Math.min(totalPages - 1, currentPage + 1); p++) {
+      addPage(p);
+    }
+
+    if (currentPage < totalPages - 2) items.push('ellipsis');
+    if (totalPages > 1) addPage(totalPages);
+
+    return items;
+  }, [currentPage, totalPages]);
+
   const handleResetFilters = () => {
     setFilters({
       searchQuery: '',
@@ -295,7 +316,7 @@ export const JobsPage: React.FC = () => {
 
             {/* PAGINATION CONTROLS */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-6 border-t border-slate-200/80 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-slate-200/80 dark:border-slate-800">
                 <button
                   type="button"
                   disabled={currentPage === 1}
@@ -306,21 +327,30 @@ export const JobsPage: React.FC = () => {
                   <span>Previous</span>
                 </button>
 
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                    <button
-                      key={page}
-                      type="button"
-                      onClick={() => setCurrentPage(page)}
-                      className={`w-8 h-8 rounded-xl text-xs font-semibold transition-colors ${
-                        currentPage === page
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center justify-center gap-1">
+                  {paginationItems.map((item, idx) =>
+                    item === 'ellipsis' ? (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-600"
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => setCurrentPage(item)}
+                        className={`w-8 h-8 shrink-0 rounded-xl text-xs font-semibold transition-colors ${
+                          currentPage === item
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    )
+                  )}
                 </div>
 
                 <button
