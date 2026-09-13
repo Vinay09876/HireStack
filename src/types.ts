@@ -1,4 +1,4 @@
-export type JobType = 'Full-time' | 'Internship' | 'Contract' | 'Part-time';
+export type JobType = 'Full-time' | 'Internship' | 'Contract';
 export type ExperienceLevel = 'Entry' | 'Mid' | 'Senior' | 'Lead';
 
 export interface Job {

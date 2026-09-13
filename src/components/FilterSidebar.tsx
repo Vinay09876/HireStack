@@ -12,7 +12,7 @@ interface FilterSidebarProps {
   className?: string;
 }
 
-const allJobTypes: JobType[] = ['Full-time', 'Internship', 'Contract', 'Part-time'];
+const allJobTypes: JobType[] = ['Full-time', 'Internship', 'Contract'];
 const allExpLevels: ExperienceLevel[] = ['Entry', 'Mid', 'Senior', 'Lead'];
 
 export const FilterSidebar: React.FC<FilterSidebarProps> = ({

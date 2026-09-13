@@ -140,9 +140,9 @@ export const JobsPage: React.FC = () => {
     } else if (sortBy === 'salary') {
       // Crude salary sorting based on upper bound
       const extractMaxSalary = (s: string) => {
-        const matches = s.match(/\$([0-9,]+)/g);
+        const matches = s.match(/₹([0-9,]+)/g);
         if (matches && matches.length > 0) {
-          const last = matches[matches.length - 1].replace(/[\$,]/g, '');
+          const last = matches[matches.length - 1].replace(/[₹,]/g, '');
           return parseInt(last, 10);
         }
         return 0;
