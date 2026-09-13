@@ -1,12 +1,12 @@
 import React from 'react';
 import { RotateCcw, Filter, MapPin, Building, Calendar, Layers, Award } from 'lucide-react';
 import { ExperienceLevel, FilterState, JobType } from '../types';
-import { mockCompanies } from '../data/mockData';
 
 interface FilterSidebarProps {
   filters: FilterState;
   onFilterChange: (filters: FilterState) => void;
   availableLocations: string[];
+  availableCompanies: string[];
   totalResultsCount: number;
   onReset: () => void;
   className?: string;
@@ -19,6 +19,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
   filters,
   onFilterChange,
   availableLocations,
+  availableCompanies,
   totalResultsCount,
   onReset,
   className = '',
@@ -121,9 +122,9 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-200 px-3 py-2.5 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer"
           >
             <option value="">All Top Tech Companies</option>
-            {mockCompanies.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
+            {availableCompanies.map((name) => (
+              <option key={name} value={name}>
+                {name}
               </option>
             ))}
           </select>

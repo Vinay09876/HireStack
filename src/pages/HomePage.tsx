@@ -58,7 +58,7 @@ export const HomePage: React.FC = () => {
             </h1>
 
             <p className="mt-5 text-base sm:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
-              Explore verified engineering, AI, product, and infrastructure openings from Google, Microsoft, Amazon, Meta, Apple, and Netflix. Apply directly on their official portals.
+              Explore verified engineering, AI, product, and infrastructure openings from Amazon, Netflix, NVIDIA, Accenture, and other top employers. Apply directly on their official portals.
             </p>
           </div>
 
@@ -138,18 +138,18 @@ export const HomePage: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => handleChipClick('company', 'Google')}
+              onClick={() => handleChipClick('company', 'Amazon')}
               className="px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
             >
-              Google
+              Amazon
             </button>
 
             <button
               type="button"
-              onClick={() => handleChipClick('company', 'Meta')}
+              onClick={() => handleChipClick('company', 'Netflix')}
               className="px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
             >
-              Meta
+              Netflix
             </button>
           </div>
         </div>

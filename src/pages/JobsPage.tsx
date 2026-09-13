@@ -75,6 +75,12 @@ export const JobsPage: React.FC = () => {
     return locs.sort();
   }, [jobs]);
 
+  // Extract distinct companies (that actually have jobs) for dropdown
+  const availableCompanies = useMemo(() => {
+    const names = Array.from(new Set(jobs.map((j) => j.companyName)));
+    return names.sort();
+  }, [jobs]);
+
   // Filter logic
   const filteredJobs = useMemo(() => {
     return jobs.filter((job) => {
@@ -250,6 +256,7 @@ export const JobsPage: React.FC = () => {
               filters={filters}
               onFilterChange={setFilters}
               availableLocations={availableLocations}
+              availableCompanies={availableCompanies}
               totalResultsCount={sortedJobs.length}
               onReset={handleResetFilters}
             />
@@ -394,6 +401,7 @@ export const JobsPage: React.FC = () => {
                 filters={filters}
                 onFilterChange={setFilters}
                 availableLocations={availableLocations}
+                availableCompanies={availableCompanies}
                 totalResultsCount={sortedJobs.length}
                 onReset={handleResetFilters}
                 className="border-0 shadow-none p-0"

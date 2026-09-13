@@ -1,9 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Briefcase, ExternalLink, ShieldCheck, Heart } from 'lucide-react';
-import { mockCompanies } from '../data/mockData';
+import { useJob } from '../context/JobContext';
 
 export const Footer: React.FC = () => {
+  const { companies } = useJob();
+
   return (
     <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -19,7 +21,7 @@ export const Footer: React.FC = () => {
               </span>
             </Link>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Curated tech careers aggregated directly from top engineering teams including Google, Microsoft, Amazon, Meta, Apple, and Netflix.
+              Curated tech careers aggregated directly from top engineering teams including Amazon, Netflix, NVIDIA, Accenture, and more.
             </p>
             <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded-lg w-fit border border-emerald-200 dark:border-emerald-900">
               <ShieldCheck className="w-3.5 h-3.5" />
@@ -67,7 +69,7 @@ export const Footer: React.FC = () => {
               Top Tech Giants
             </h4>
             <ul className="space-y-2 text-xs">
-              {mockCompanies.slice(0, 5).map((c) => (
+              {companies.slice(0, 5).map((c) => (
                 <li key={c.id}>
                   <Link
                     to={`/companies/${c.id}`}
