@@ -63,6 +63,19 @@ async function deactivateMissingJobs(companyId, activeIds) {
   if (error) throw new Error(`deactivate failed for ${companyId}: ${error.message}`);
 }
 
+// Hard ceiling on how long a single company's fetch can run for. Individual
+// requests already time out and retry inside fetchJson(), but this is a
+// backstop so a company that keeps paginating (or any other runaway loop)
+// can never stall the whole scheduled run.
+const COMPANY_TIMEOUT_MS = 120000;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 async function run() {
   const summary = [];
 
@@ -76,7 +89,7 @@ async function run() {
     try {
       await upsertCompany(company);
 
-      const rawJobs = await adapter(company);
+      const rawJobs = await withTimeout(adapter(company), COMPANY_TIMEOUT_MS, company.name);
       const indiaJobs = rawJobs.filter(isIndiaJob);
       const normalizedWithDupes = indiaJobs.map((raw) => normalizeJob(company, raw));
 

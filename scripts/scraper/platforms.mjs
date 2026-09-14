@@ -7,21 +7,40 @@ const USER_AGENT =
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchJson(url, options = {}, retriesLeft = 2) {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'application/json',
-      ...(options.headers || {}),
-    },
-  });
+const REQUEST_TIMEOUT_MS = 20000;
+
+async function fetchJson(url, options = {}, retriesLeft = 2, retryable403 = false) {
+  let res;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json',
+        ...(options.headers || {}),
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // A hung/unresponsive server must never stall the whole scraper run -
+    // treat a timeout the same as a retryable transient failure.
+    if (retriesLeft > 0 && err.name === 'TimeoutError') {
+      await sleep(1500 * (3 - retriesLeft));
+      return fetchJson(url, options, retriesLeft - 1, retryable403);
+    }
+    throw err;
+  }
   if (!res.ok) {
     // Transient errors (rate limiting, momentary server hiccups) get a
     // couple of backed-off retries before we give up on this request.
-    if (retriesLeft > 0 && (res.status === 429 || res.status >= 500)) {
-      await sleep(1500 * (3 - retriesLeft));
-      return fetchJson(url, options, retriesLeft - 1);
+    // 403 is only treated as transient for platforms known to use it as a
+    // soft rate-limit (e.g. Darwinbox) - elsewhere a 403 usually means
+    // genuinely gated access and retrying is pointless.
+    const isTransient = res.status === 429 || res.status >= 500 || (retryable403 && res.status === 403);
+    if (retriesLeft > 0 && isTransient) {
+      const baseDelay = retryable403 && res.status === 403 ? 6000 : 1500;
+      await sleep(baseDelay * (3 - retriesLeft));
+      return fetchJson(url, options, retriesLeft - 1, retryable403);
     }
     throw new Error(`${url} -> HTTP ${res.status}`);
   }
@@ -215,6 +234,230 @@ export async function fetchUrbanCompanyCustom() {
   }));
 }
 
+export async function fetchTurboHire(company) {
+  const tokenRes = await fetchJson('https://api.turbohire.co/api/token/noauth', {
+    headers: { Referer: company.turboHireReferer },
+  });
+  const token = tokenRes.access_token;
+
+  const data = await fetchJson(
+    `https://thapi.azurewebsites.net/api/careerpagev2/filteredjobs?orgId=${company.turboHireOrgId}&pageType=0`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        Referer: company.turboHireReferer,
+      },
+      body: JSON.stringify({
+        SortByV2: { Key: 'PostedDate', Order: 2 },
+        BunitIds: { Value: null, FilterType: 0 },
+        Experience: { Value: null, FilterType: 0 },
+        JobTypes: { Value: null, FilterType: 0 },
+        JobTypeV2: { Value: null, FilterType: 0 },
+        Locations: { Value: null, FilterType: 0 },
+        CreatedDate: { Value: null, FilterType: 0 },
+        Compensation: { Value: null, FilterType: 0 },
+        Skills: { Value: null, FilterType: 0 },
+        Keyword: '',
+        ClientIds: { Value: null, FilterType: 0 },
+        Department: '',
+        CustomFields: {},
+      }),
+    }
+  );
+
+  return (data.Result || []).map((job) => {
+    let location = '';
+    try {
+      const locs = JSON.parse(job.Location || '[]');
+      location = locs[0]?.Address || '';
+    } catch {
+      // leave location empty if the field is malformed
+    }
+    return {
+      externalId: job.JobId,
+      title: job.JobTitle,
+      location,
+      department: job.Department || null,
+      postedDate: job.PublishedDate ? job.PublishedDate.slice(0, 10) : null,
+      applicationUrl: `${company.turboHireReferer}job/${job.JobIdObfuscated}`,
+      isRemote: /remote/i.test(location),
+    };
+  });
+}
+
+export async function fetchZohoRecruit(company) {
+  const url =
+    `https://${company.zohoHost}/recruit/v2/public/Job_Openings` +
+    `?pagename=Careers&source=CareerSite&extra_fields=%5B%22Remote_Job%22%2C%22Job_Description%22%5D`;
+  const data = await fetchJson(url);
+  return (data.data || []).map((job) => ({
+    externalId: job.id,
+    title: job.Posting_Title || job.Job_Opening_Name,
+    location: job.City || job.Country1 || '',
+    department: null,
+    postedDate: job.Date_Opened ? job.Date_Opened.slice(0, 10) : null,
+    applicationUrl: job.$url || `https://${company.zohoHost}/jobs/Careers`,
+    isRemote: job.Remote_Job === true || job.Remote_Job === 'true',
+    countryHint: job.Country1 || null,
+  }));
+}
+
+export async function fetchPhenomJobStream(company) {
+  const jobs = [];
+  let pageNumber = 0;
+  const maxPages = 60; // safety cap
+  for (let page = 0; page < maxPages; page++) {
+    const data = await fetchJson(`https://${company.phenomHost}/services/recruiting/v1/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locale: 'en_US',
+        pageNumber,
+        sortBy: '',
+        keywords: '',
+        location: company.phenomLocationParam ?? 'india',
+        facetFilters: company.phenomFacetFilters ?? {},
+        brand: '',
+        skills: [],
+        categoryId: 0,
+        alertId: '',
+        rcmCandidateId: '',
+      }),
+    });
+    const batch = (data.jobSearchResult || []).map((r) => r.response);
+    jobs.push(...batch);
+    pageNumber += 1;
+    if (batch.length < 10) break;
+    await sleep(PAGE_DELAY_MS);
+  }
+  return jobs.map((job) => {
+    const cities = job.jobLocationShort || job.custprimecity || [];
+    const rawLocation = Array.isArray(cities) ? cities[0] : cities;
+    const location = (rawLocation || '').replace(/<br\/?>/g, '').trim() || 'India';
+    return {
+      externalId: job.id,
+      title: job.unifiedStandardTitle || job.unifiedUrlTitle,
+      location,
+      department: null,
+      postedDate: null,
+      applicationUrl: `https://${company.phenomHost}/job/${job.urlTitle}/${job.id}`,
+      isRemote: /remote/i.test(location),
+    };
+  });
+}
+
+export async function fetchInfosysCustom() {
+  const data = await fetchJson(
+    'https://intapgateway.infosysapps.com/careersci/search/intapjbsrch/getHotJobsDetails?location=All%20locations&sourceId=1,21'
+  );
+  return (data.hotJobsLists || []).map((job) => ({
+    externalId: String(job.postingId),
+    title: job.postingTitle,
+    location: job.location || 'India',
+    department: job.unit || null,
+    postedDate: job.createdOn ? job.createdOn.slice(0, 10) : null,
+    applicationUrl: `https://career.infosys.com/joblist/${job.requisitionId}`,
+    isRemote: /remote/i.test(job.location || ''),
+  }));
+}
+
+export async function fetchCapgeminiCustom() {
+  const jobs = [];
+  let page = 1;
+  const size = 50;
+  const maxPages = 10;
+  for (let i = 0; i < maxPages; i++) {
+    const data = await fetchJson(
+      `https://cg-jobstream-api.azurewebsites.net/api/job-search?page=${page}&size=${size}&country_code=in-en`
+    );
+    const batch = data.data || [];
+    jobs.push(...batch);
+    page += 1;
+    if (batch.length < size) break;
+    await sleep(PAGE_DELAY_MS);
+  }
+  return jobs.map((job) => ({
+    externalId: job.id,
+    title: job.title || job.job_title,
+    location: job.city || job.location || 'India',
+    department: job.brand || null,
+    postedDate: job.posted_date ? job.posted_date.slice(0, 10) : null,
+    applicationUrl: job.apply_url || job.url || 'https://www.capgemini.com/in-en/careers/',
+    isRemote: /remote/i.test(job.city || job.location || ''),
+  }));
+}
+
+export async function fetchDarwinbox(company) {
+  const jobs = [];
+  let pageNum = 1;
+  const limit = 20;
+  const maxPages = 20;
+  for (let i = 0; i < maxPages; i++) {
+    const data = await fetchJson(
+      `https://${company.darwinboxHost}/ms/candidateapi/job/alljobs?companyId=${company.darwinboxCompanyId}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Referer: `https://${company.darwinboxHost}/`,
+        },
+        body: JSON.stringify({
+          companyId: company.darwinboxCompanyId,
+          page: pageNum,
+          sort_option: 'new',
+          limit,
+        }),
+      },
+      2,
+      true
+    );
+    const batch = data.data || [];
+    jobs.push(...batch);
+    pageNum += 1;
+    if (batch.length < limit) break;
+    await sleep(PAGE_DELAY_MS);
+  }
+  return jobs.map((job) => ({
+    externalId: job.id || job._id,
+    title: job.title || job.designation_name || 'Untitled role',
+    location: (job.officelocations_without_area?.[0] || job.country || 'India').replace(/\r/g, '').trim(),
+    department: job.department_name_only || null,
+    postedDate: job.posted_on ? new Date(job.posted_on * 1000).toISOString().slice(0, 10) : null,
+    applicationUrl: company.websiteUrl,
+    isRemote: job.is_remote === 1,
+  }));
+}
+
+export async function fetchAmdCustom() {
+  const jobs = [];
+  let pageNum = 1;
+  const maxPages = 20;
+  for (let i = 0; i < maxPages; i++) {
+    const data = await fetchJson(
+      `https://careers.amd.com/api/jobs?location=India&page=${pageNum}&sortBy=relevance&descending=false&internal=false`
+    );
+    const batch = data.jobs || [];
+    jobs.push(...batch);
+    pageNum += 1;
+    if (batch.length === 0) break;
+    await sleep(PAGE_DELAY_MS);
+  }
+  return jobs.map((job) => {
+    const j = job.data || job;
+    return {
+      externalId: j.req_id || j.slug,
+      title: j.title,
+      location: j.location || 'India',
+      department: null,
+      postedDate: null,
+      applicationUrl: `https://careers.amd.com/careers-home/jobs/${j.slug}`,
+      isRemote: /remote/i.test(j.location || ''),
+    };
+  });
+}
+
 export const PLATFORM_ADAPTERS = {
   greenhouse: fetchGreenhouse,
   lever: fetchLever,
@@ -224,4 +467,11 @@ export const PLATFORM_ADAPTERS = {
   'amazon-custom': fetchAmazonCustom,
   'urbancompany-custom': fetchUrbanCompanyCustom,
   eightfold: fetchEightfold,
+  turbohire: fetchTurboHire,
+  'zoho-recruit': fetchZohoRecruit,
+  'phenom-jobstream': fetchPhenomJobStream,
+  'infosys-custom': fetchInfosysCustom,
+  'capgemini-custom': fetchCapgeminiCustom,
+  darwinbox: fetchDarwinbox,
+  'amd-custom': fetchAmdCustom,
 };
