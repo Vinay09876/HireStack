@@ -7,6 +7,38 @@ const USER_AGENT =
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Strips HTML tags/entities down to plain text for storing as a job
+// description - good enough for a job board card/detail view, not meant to
+// preserve rich formatting.
+//
+// Some ATS APIs (Greenhouse) double-encode their HTML field - the string
+// contains literal "&lt;div&gt;" rather than "<div>" - so entities must be
+// decoded BEFORE tag-stripping runs, or the tags never match as real "<...>".
+function decodeEntities(str) {
+  return str
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
+function stripHtml(html) {
+  if (!html) return '';
+  const decoded = decodeEntities(html);
+  return decodeEntities(
+    decoded
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+  )
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const REQUEST_TIMEOUT_MS = 20000;
 
 async function fetchJson(url, options = {}, retriesLeft = 2, retryable403 = false) {
@@ -60,6 +92,7 @@ export async function fetchGreenhouse(company) {
     department: job.departments?.[0]?.name || null,
     postedDate: job.updated_at ? job.updated_at.slice(0, 10) : null,
     applicationUrl: job.absolute_url,
+    description: stripHtml(job.content),
     isRemote: /remote/i.test(job.location?.name || ''),
   }));
 }
@@ -67,15 +100,35 @@ export async function fetchGreenhouse(company) {
 export async function fetchLever(company) {
   const url = `https://api.lever.co/v0/postings/${company.platformId}?mode=json`;
   const data = await fetchJson(url);
-  return (data || []).map((job) => ({
-    externalId: String(job.id),
-    title: job.text,
-    location: job.categories?.location || '',
-    department: job.categories?.team || null,
-    postedDate: job.createdAt ? new Date(job.createdAt).toISOString().slice(0, 10) : null,
-    applicationUrl: job.applyUrl || job.hostedUrl,
-    isRemote: /remote/i.test(job.categories?.location || ''),
-  }));
+  return (data || []).map((job) => {
+    // Lever's "lists" holds named bullet sections - typically responsibilities
+    // and requirements/qualifications, but the exact labels vary per company.
+    const responsibilitiesList = job.lists?.find((l) =>
+      /responsib|what (you|will you|we'?ll)|what does this role|role overview|day.to.day/i.test(l.text || '')
+    );
+    const requirementsList = job.lists?.find((l) =>
+      /require|qualifi|you (should|have|are|bring)|what (you|we're looking|you'll need)|apply if/i.test(l.text || '')
+    );
+    const stripListItems = (html) =>
+      (html || '')
+        .split(/<li[^>]*>/i)
+        .slice(1)
+        .map((item) => stripHtml(item.split(/<\/li>/i)[0]))
+        .filter(Boolean);
+
+    return {
+      externalId: String(job.id),
+      title: job.text,
+      location: job.categories?.location || '',
+      department: job.categories?.team || null,
+      postedDate: job.createdAt ? new Date(job.createdAt).toISOString().slice(0, 10) : null,
+      applicationUrl: job.applyUrl || job.hostedUrl,
+      description: job.descriptionPlain || stripHtml(job.description),
+      responsibilities: responsibilitiesList ? stripListItems(responsibilitiesList.content) : [],
+      requirements: requirementsList ? stripListItems(requirementsList.content) : [],
+      isRemote: /remote/i.test(job.categories?.location || ''),
+    };
+  });
 }
 
 export async function fetchSmartRecruiters(company) {
@@ -179,6 +232,13 @@ export async function fetchAmazonCustom() {
     if (batch.length < limit) break;
     await sleep(PAGE_DELAY_MS);
   }
+  // Amazon formats qualification blocks as "- item one<br/>- item two<br/>...".
+  const splitDashList = (html) =>
+    stripHtml(html)
+      .split('\n')
+      .map((line) => line.replace(/^[-•\s]+/, '').trim())
+      .filter(Boolean);
+
   return jobs.map((job) => ({
     externalId: String(job.id_icims || job.id),
     title: job.title,
@@ -186,6 +246,9 @@ export async function fetchAmazonCustom() {
     department: job.business_category || null,
     postedDate: job.posted_date ? new Date(job.posted_date).toISOString().slice(0, 10) : null,
     applicationUrl: `https://www.amazon.jobs${job.job_path}`,
+    description: stripHtml(job.description || job.description_short),
+    requirements: job.basic_qualifications ? splitDashList(job.basic_qualifications) : [],
+    qualifications: job.preferred_qualifications ? splitDashList(job.preferred_qualifications) : [],
     isRemote: /remote/i.test(job.normalized_location || ''),
     countryHint: job.country_code || null,
   }));
