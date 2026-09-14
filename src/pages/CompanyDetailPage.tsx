@@ -18,7 +18,7 @@ import { JobCard } from '../components/JobCard';
 export const CompanyDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getCompanyById, getJobsByCompany, companies } = useJob();
+  const { getCompanyById, getJobsByCompany, companies, loading } = useJob();
 
   const company = getCompanyById(id || '');
   const openJobs = getJobsByCompany(id || '');
@@ -26,6 +26,14 @@ export const CompanyDetailPage: React.FC = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+        Loading company details...
+      </div>
+    );
+  }
 
   if (!company) {
     return (

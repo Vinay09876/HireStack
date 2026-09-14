@@ -24,7 +24,7 @@ import { formatPostedDate } from '../utils/date';
 export const JobDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getJobById, getCompanyById, getJobsByCompany, jobs } = useJob();
+  const { getJobById, getCompanyById, getJobsByCompany, jobs, loading } = useJob();
 
   const job = getJobById(id || '');
 
@@ -32,6 +32,14 @@ export const JobDetailPage: React.FC = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+        Loading job details...
+      </div>
+    );
+  }
 
   if (!job) {
     return (
