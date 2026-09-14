@@ -300,8 +300,8 @@ export const JobDetailPage: React.FC = () => {
                   <span className="text-xs font-normal text-slate-400">({otherCompanyRoles.length})</span>
                 </h3>
 
-                <div className="space-y-3">
-                  {otherCompanyRoles.map((role) => (
+                <div className="space-y-3 max-h-96 overflow-y-auto pr-1 -mr-1">
+                  {otherCompanyRoles.slice(0, 50).map((role) => (
                     <Link
                       key={role.id}
                       to={`/jobs/${role.id}`}
@@ -318,6 +318,15 @@ export const JobDetailPage: React.FC = () => {
                     </Link>
                   ))}
                 </div>
+                {otherCompanyRoles.length > 50 && (
+                  <Link
+                    to={`/companies/${job.companyId}`}
+                    className="mt-3 flex items-center justify-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+                  >
+                    <span>View all {otherCompanyRoles.length} roles</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </Link>
+                )}
               </div>
             )}
           </div>
