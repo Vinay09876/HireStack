@@ -20,7 +20,7 @@ import { getDaysAgo } from '../utils/date';
 
 const ITEMS_PER_PAGE = 20;
 
-type SortOption = 'recent' | 'relevance' | 'salary';
+type SortOption = 'recent' | 'relevance';
 
 export const JobsPage: React.FC = () => {
   const { jobs, loading } = useJob();
@@ -144,17 +144,6 @@ export const JobsPage: React.FC = () => {
     const list = [...filteredJobs];
     if (sortBy === 'recent') {
       list.sort((a, b) => new Date(b.postedDate).getTime() - new Date(a.postedDate).getTime());
-    } else if (sortBy === 'salary') {
-      // Crude salary sorting based on upper bound
-      const extractMaxSalary = (s: string) => {
-        const matches = s.match(/₹([0-9,]+)/g);
-        if (matches && matches.length > 0) {
-          const last = matches[matches.length - 1].replace(/[₹,]/g, '');
-          return parseInt(last, 10);
-        }
-        return 0;
-      };
-      list.sort((a, b) => extractMaxSalary(b.salaryRange) - extractMaxSalary(a.salaryRange));
     }
     // 'relevance' keeps default search ranking
     return list;
@@ -283,7 +272,6 @@ export const JobsPage: React.FC = () => {
                 >
                   <option value="recent">Most Recent</option>
                   <option value="relevance">Relevance</option>
-                  <option value="salary">Highest Compensation</option>
                 </select>
               </div>
             </div>

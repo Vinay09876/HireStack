@@ -121,10 +121,12 @@ export const JobDetailPage: React.FC = () => {
                     <MapPin className="w-3.5 h-3.5 text-slate-400" />
                     {job.location}
                   </span>
-                  <span className="flex items-center gap-1 font-semibold text-slate-800 dark:text-slate-200">
-                    <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-                    {job.salaryRange}
-                  </span>
+                  {job.salaryRange && (
+                    <span className="flex items-center gap-1 font-semibold text-slate-800 dark:text-slate-200">
+                      <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                      {job.salaryRange}
+                    </span>
+                  )}
                   <span className="flex items-center gap-1">
                     <Briefcase className="w-3.5 h-3.5 text-slate-400" />
                     {job.jobType} ({job.experienceLevel} Level)

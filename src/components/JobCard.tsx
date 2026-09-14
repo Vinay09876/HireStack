@@ -114,9 +114,11 @@ export const JobCard: React.FC<JobCardProps> = ({
               <MapPin className="w-3.5 h-3.5 shrink-0 text-slate-400" />
               <span className="truncate">{job.location}</span>
             </div>
-            <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate">
-              {job.salaryRange}
-            </div>
+            {job.salaryRange && (
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate">
+                {job.salaryRange}
+              </div>
+            )}
           </div>
 
           <div className="shrink-0 flex items-center gap-1.5">
@@ -170,10 +172,12 @@ export const JobCard: React.FC<JobCardProps> = ({
                 <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 {job.location}
               </span>
-              <span className="flex items-center gap-1 font-medium text-slate-800 dark:text-slate-200">
-                <DollarSign className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                {job.salaryRange}
-              </span>
+              {job.salaryRange && (
+                <span className="flex items-center gap-1 font-medium text-slate-800 dark:text-slate-200">
+                  <DollarSign className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  {job.salaryRange}
+                </span>
+              )}
               {job.department && (
                 <span className="hidden md:inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
                   <Briefcase className="w-3.5 h-3.5 text-slate-400 shrink-0" />

@@ -14,7 +14,7 @@ export interface Job {
   responsibilities: string[];
   requirements: string[];
   qualifications?: string[];
-  salaryRange: string;
+  salaryRange?: string | null;
   applicationUrl: string;
   postedDate: string; // ISO string or YYYY-MM-DD
   isActive: boolean;
