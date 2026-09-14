@@ -18,7 +18,7 @@ import { JobCard } from '../components/JobCard';
 export const CompanyDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getCompanyById, getJobsByCompany, companies, loading } = useJob();
+  const { getCompanyById, getJobsByCompany, companies, loading, loadError, retryLoad } = useJob();
 
   const company = getCompanyById(id || '');
   const openJobs = getJobsByCompany(id || '');
@@ -26,6 +26,21 @@ export const CompanyDetailPage: React.FC = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
+
+  if (loadError) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center text-center px-4">
+        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{loadError}</p>
+        <button
+          type="button"
+          onClick={retryLoad}
+          className="px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

@@ -4,7 +4,7 @@ import { useJob } from '../context/JobContext';
 import { CompanyCard } from '../components/CompanyCard';
 
 export const CompaniesPage: React.FC = () => {
-  const { companies } = useJob();
+  const { companies, loading, loadError, retryLoad } = useJob();
 
   return (
     <div className="min-h-screen bg-slate-50/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 transition-colors">
@@ -22,11 +22,28 @@ export const CompaniesPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {companies.map((company) => (
-            <CompanyCard key={company.id} company={company} />
-          ))}
-        </div>
+        {loadError ? (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center">
+            <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{loadError}</p>
+            <button
+              type="button"
+              onClick={retryLoad}
+              className="px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : loading ? (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-sm text-slate-500 dark:text-slate-400">
+            Loading companies...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {companies.map((company) => (
+              <CompanyCard key={company.id} company={company} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

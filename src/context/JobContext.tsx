@@ -14,6 +14,8 @@ interface JobContextType {
   jobs: Job[];
   companies: Company[];
   loading: boolean;
+  loadError: string | null;
+  retryLoad: () => void;
   savedJobIds: string[];
   toggleSaveJob: (id: string) => void;
   isJobSaved: (id: string) => boolean;
@@ -97,45 +99,76 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   const [savedJobIds, setSavedJobIds] = useState<string[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>(emptyProfile);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
 
-  // Load public job/company data once on mount
+  // Load public job/company data on mount (and whenever retryLoad() is called)
   useEffect(() => {
-    (async () => {
-      const { data: companyRows, error: companyError } = await supabase.from('companies').select('*');
-      if (companyError) console.error('Failed to load companies:', companyError.message);
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
 
-      // Supabase caps a single select() at 1000 rows, so page through
-      // all active jobs rather than silently truncating the result.
-      const PAGE_SIZE = 1000;
-      const jobRows: any[] = [];
-      for (let from = 0; ; from += PAGE_SIZE) {
-        const { data, error } = await supabase
-          .from('jobs')
-          .select('*')
-          .eq('is_active', true)
-          .range(from, from + PAGE_SIZE - 1);
-        if (error) {
-          console.error('Failed to load jobs:', error.message);
-          break;
-        }
-        jobRows.push(...(data || []));
-        if (!data || data.length < PAGE_SIZE) break;
+    // A hard ceiling so a hung request can never leave the UI stuck on a
+    // loading spinner forever - surface a retryable error instead.
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) {
+        cancelled = true;
+        setLoadError('Loading is taking longer than expected. Please try again.');
+        setLoading(false);
       }
+    }, 20000);
 
-      const mappedCompanies = (companyRows || []).map(mapCompanyRow);
-      const companyById = new Map(mappedCompanies.map((c) => [c.id, c]));
-      const mappedJobs = jobRows.map((row) => mapJobRow(row, companyById));
+    (async () => {
+      try {
+        const { data: companyRows, error: companyError } = await supabase.from('companies').select('*');
+        if (companyError) throw new Error(companyError.message);
 
-      setCompanies(mappedCompanies);
-      setJobs(mappedJobs);
-      setLoading(false);
+        // Supabase caps a single select() at 1000 rows, so page through
+        // all active jobs rather than silently truncating the result.
+        const PAGE_SIZE = 1000;
+        const jobRows: any[] = [];
+        for (let from = 0; ; from += PAGE_SIZE) {
+          const { data, error } = await supabase
+            .from('jobs')
+            .select('*')
+            .eq('is_active', true)
+            .range(from, from + PAGE_SIZE - 1);
+          if (error) throw new Error(error.message);
+          jobRows.push(...(data || []));
+          if (!data || data.length < PAGE_SIZE) break;
+        }
+
+        if (cancelled) return;
+
+        const mappedCompanies = (companyRows || []).map(mapCompanyRow);
+        const companyById = new Map(mappedCompanies.map((c) => [c.id, c]));
+        const mappedJobs = jobRows.map((row) => mapJobRow(row, companyById));
+
+        setCompanies(mappedCompanies);
+        setJobs(mappedJobs);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Failed to load jobs/companies:', err);
+        setLoadError(err instanceof Error ? err.message : 'Failed to load jobs.');
+        setLoading(false);
+      } finally {
+        clearTimeout(timeoutId);
+      }
     })();
-  }, []);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [reloadToken]);
+
+  const retryLoad = useCallback(() => setReloadToken((t: number) => t + 1), []);
 
   // Load the user's saved jobs + profile whenever their session changes
   const loadUserData = useCallback(async (userId: string) => {
@@ -281,6 +314,8 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         jobs,
         companies,
         loading,
+        loadError,
+        retryLoad,
         savedJobIds,
         toggleSaveJob,
         isJobSaved,

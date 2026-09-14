@@ -24,7 +24,7 @@ import { formatPostedDate } from '../utils/date';
 export const JobDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getJobById, getCompanyById, getJobsByCompany, jobs, loading } = useJob();
+  const { getJobById, getCompanyById, getJobsByCompany, jobs, loading, loadError, retryLoad } = useJob();
 
   const job = getJobById(id || '');
 
@@ -32,6 +32,21 @@ export const JobDetailPage: React.FC = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
+
+  if (loadError) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center text-center px-4">
+        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{loadError}</p>
+        <button
+          type="button"
+          onClick={retryLoad}
+          className="px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

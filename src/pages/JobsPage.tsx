@@ -23,7 +23,7 @@ const ITEMS_PER_PAGE = 20;
 type SortOption = 'recent' | 'relevance';
 
 export const JobsPage: React.FC = () => {
-  const { jobs, loading } = useJob();
+  const { jobs, loading, loadError, retryLoad } = useJob();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Mobile filters drawer open state
@@ -277,7 +277,18 @@ export const JobsPage: React.FC = () => {
             </div>
 
             {/* List of Job Cards */}
-            {loading ? (
+            {loadError ? (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center">
+                <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{loadError}</p>
+                <button
+                  type="button"
+                  onClick={retryLoad}
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : loading ? (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-sm text-slate-500 dark:text-slate-400">
                 Loading jobs...
               </div>
