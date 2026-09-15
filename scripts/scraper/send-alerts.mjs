@@ -128,13 +128,22 @@ async function main() {
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   console.log(`Loading jobs created since ${since}...`);
-  const { data: newJobs, error: jobsError } = await supabase
-    .from('jobs')
-    .select('id, title, description, company_id, location, experience_level, is_active, created_at')
-    .eq('is_active', true)
-    .gte('created_at', since);
-  if (jobsError) throw new Error(`Failed to load new jobs: ${jobsError.message}`);
-  if (!newJobs || newJobs.length === 0) {
+  // Supabase caps a single select() at 1000 rows, so page through all
+  // matching jobs rather than silently truncating the result.
+  const PAGE_SIZE = 1000;
+  const newJobs = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('id, title, description, company_id, location, experience_level, is_active, created_at')
+      .eq('is_active', true)
+      .gte('created_at', since)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`Failed to load new jobs: ${error.message}`);
+    newJobs.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  if (newJobs.length === 0) {
     console.log('No new jobs in the last 24 hours. Nothing to do.');
     return;
   }
