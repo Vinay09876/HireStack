@@ -907,6 +907,32 @@ export async function fetchDarwinbox(company) {
   }));
 }
 
+// AMD's list API already returns the full description, but as plain text
+// (no HTML) that always opens with one of two fixed company-mission
+// sentences and always closes with the same boilerplate legal/benefits
+// paragraph - neither is job-specific content, so both are stripped.
+// Section markers within the remaining text ("Key Responsibilities",
+// "Required Qualifications"/"Required Skills", "Preferred Qualifications")
+// vary in case and wording and aren't present on every posting, so rather
+// than risk mis-splitting inconsistent plain-text bullets, only the known
+// boilerplate is removed and the rest is kept as readable prose.
+const AMD_INTRO_PATTERNS = [
+  /^WHAT YOU DO AT AMD CHANGES EVERYTHING\s+At AMD, our mission is to build great products[\s\S]*?Together, we advance your career\.\s*/i,
+  /^ADVANCE YOUR CAREER\. ADVANCE THE WORLD\.[\s\S]*?technology that moves the world forward\.\s*/i,
+];
+const AMD_OUTRO_PATTERN =
+  /\s*Benefits offered are described: AMD benefits at a glance\.[\s\S]*$/i;
+
+function cleanAmdDescription(raw) {
+  if (!raw) return '';
+  let text = raw;
+  for (const pattern of AMD_INTRO_PATTERNS) {
+    text = text.replace(pattern, '');
+  }
+  text = text.replace(AMD_OUTRO_PATTERN, '');
+  return text.trim();
+}
+
 export async function fetchAmdCustom() {
   const jobs = [];
   let pageNum = 1;
@@ -930,6 +956,7 @@ export async function fetchAmdCustom() {
       department: null,
       postedDate: null,
       applicationUrl: `https://careers.amd.com/careers-home/jobs/${j.slug}`,
+      description: cleanAmdDescription(j.description) || undefined,
       isRemote: /remote/i.test(j.location || ''),
     };
   });
