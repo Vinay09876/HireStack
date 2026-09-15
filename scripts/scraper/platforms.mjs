@@ -289,6 +289,30 @@ export async function fetchWorkday(company) {
   });
 }
 
+// Oracle HCM's list endpoint never carries a real description (its
+// ExternalResponsibilitiesStr/ExternalQualificationsStr fields come back
+// empty even when the detail endpoint has real content) - only the
+// per-job detail endpoint has it, as ExternalDescriptionStr HTML. That
+// HTML uses the same "<p><strong>Section Title</strong></p> followed by a
+// <ul>" pattern already handled for Wipro/Capgemini, so the same
+// splitIntoSections/classification helpers apply directly.
+async function fetchOracleHcmJobDetail(company, jobId) {
+  const finder = `ById;Id="${jobId}",siteNumber=${company.siteNumber}`;
+  const url =
+    `https://${company.platformId}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails` +
+    `?onlyData=true&finder=${encodeURIComponent(finder)}`;
+  const data = await fetchJson(url);
+  const detail = data.items?.[0];
+  const raw = detail?.ExternalDescriptionStr;
+  if (!raw) throw new Error(`no ExternalDescriptionStr for job ${jobId}`);
+  const sections = splitIntoSections(raw);
+  const classified = classifyPhenomSections(sections);
+  if (!classified.description && classified.responsibilities.length === 0) {
+    classified.description = stripHtml(raw);
+  }
+  return classified;
+}
+
 export async function fetchOracleHcm(company) {
   const jobs = [];
   let offset = 0;
@@ -306,7 +330,8 @@ export async function fetchOracleHcm(company) {
     if (requisitions.length < limit) break;
     await sleep(PAGE_DELAY_MS);
   }
-  return jobs.map((job) => ({
+
+  const results = jobs.map((job) => ({
     externalId: job.Id,
     title: job.Title,
     location: job.PrimaryLocation || '',
@@ -316,6 +341,38 @@ export async function fetchOracleHcm(company) {
     isRemote: (job.WorkplaceTypeCode || '').toLowerCase() === 'remote',
     countryHint: job.PrimaryLocationCountry || null,
   }));
+
+  // Detail-fetch only India-looking postings to keep request volume down,
+  // same approach as Workday. countryHint (PrimaryLocationCountry) is
+  // reliable when present; location text is the fallback.
+  const indiaResults = results.filter((j) => {
+    if (j.countryHint) {
+      const c = j.countryHint.toUpperCase();
+      if (c === 'IN' || c === 'IND' || c === 'INDIA') return true;
+      if (c.length <= 4) return false;
+    }
+    return WORKDAY_INDIA_HINTS.some((hint) => (j.location || '').toLowerCase().includes(hint));
+  });
+  const DETAIL_CONCURRENCY = 5;
+  for (let i = 0; i < indiaResults.length; i += DETAIL_CONCURRENCY) {
+    const batch = indiaResults.slice(i, i + DETAIL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (job) => {
+        try {
+          const detail = await fetchOracleHcmJobDetail(company, job.externalId);
+          job.description = detail.description;
+          job.responsibilities = detail.responsibilities;
+          job.requirements = detail.requirements;
+          job.qualifications = detail.qualifications;
+        } catch (err) {
+          console.warn(`  Oracle HCM detail fetch failed for ${company.name} ${job.externalId}: ${err.message}`);
+        }
+      })
+    );
+    if (i + DETAIL_CONCURRENCY < indiaResults.length) await sleep(PAGE_DELAY_MS);
+  }
+
+  return results;
 }
 
 export async function fetchAmazonCustom() {
@@ -537,15 +594,44 @@ function extractPhenomDescription(html) {
   );
 }
 
+// Checks whether `html.slice(fromIndex)` is immediately followed (allowing
+// only whitespace, the paragraph's own closing tags, and empty/&nbsp;-only
+// <span> wrappers - never any other real text) by a <ul>/<ol>. This is a
+// plain string scan rather than a regex lookahead so it can't accidentally
+// match across an unrelated later list further down the document.
+function isFollowedByList(html, fromIndex) {
+  let i = fromIndex;
+  // Any run of whitespace, &nbsp;, a closing </strong|span|p|b>, or an
+  // OPENING <span ...> tag is "invisible" filler between the heading and
+  // the list - opening spans are included (not just closing ones) because
+  // Oracle HCM nests a trailing "&nbsp;" inside two levels of <span>, and
+  // this only needs to confirm no other real text sits between them.
+  const skippable = /^(?:\s|&nbsp;|<\/(strong|span|p|b)>|<span[^>]*>)+/i;
+  while (i < html.length) {
+    const rest = html.slice(i);
+    const skipMatch = rest.match(skippable);
+    if (skipMatch && skipMatch[0].length > 0) {
+      i += skipMatch[0].length;
+      continue;
+    }
+    return /^<[uo]l[\s>]/i.test(rest);
+  }
+  return false;
+}
+
 // Splits the raw description HTML into (heading, content) sections. Section
-// titles show up in at least four different markups seen across Wipro/
-// HCLTech templates:
+// titles show up in several different markups seen across Wipro/HCLTech/
+// Oracle HCM templates:
 //  - real <h1-6> tags (covers Wipro's <h4> and HCLTech's <H2 style=...>)
-//  - a <p> whose entire content is bold text and nothing else, e.g.
-//    <p><strong><span>Key Responsibilities</span></strong></p>, always
-//    immediately followed by a <ul>/<ol> - that adjacency (not "any bold
-//    text") is what's matched, to avoid treating an inline bolded phrase
-//    inside real prose as a heading.
+//  - a <strong> span whose text is short title-like prose (no sentence-
+//    ending period, under ~80 chars), immediately followed by a <ul>/<ol>
+//    once only whitespace/closing-tags/empty-span wrappers are skipped -
+//    that adjacency (not "any bold text") is what's matched, to avoid
+//    treating an inline bolded phrase inside real prose as a heading. This
+//    single check covers both a bare <p><strong>Title</strong></p> and
+//    Oracle HCM's <p><span><span><strong>Title</strong></span></span>
+//    <span>&nbsp;</span></p> variants without needing a separate pattern
+//    for each nesting shape.
 //  - a numbered <p> whose main content is bold, e.g.
 //    <p>1.<strong> Practice Growth and Revenue Leadership</strong></p> or
 //    <p><strong>2. Commercial Modeling</strong></p> - here the section's
@@ -556,14 +642,23 @@ function extractPhenomDescription(html) {
 // as an intro paragraph.
 function splitIntoSections(html) {
   const headingRe =
-    /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<p[^>]*>\s*<strong>([\s\S]*?)<\/strong>\s*<\/p>\s*(?=<[uo]l[\s>])|<p[^>]*>\s*(\d+\.\s*<strong>[\s\S]*?<\/strong>)\s*<\/p>|<p[^>]*>(<strong>\s*\d+\.[^<]*<\/strong>)\s*<\/p>/gi;
+    /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<strong>([\s\S]*?)<\/strong>|<p[^>]*>\s*(\d+\.\s*<strong>[\s\S]*?<\/strong>)\s*<\/p>|<p[^>]*>(<strong>\s*\d+\.[^<]*<\/strong>)\s*<\/p>/gi;
   const sections = [];
   let lastIndex = 0;
   let lastHeading = null;
   let match;
   while ((match = headingRe.exec(html)) !== null) {
-    const titleHtml = match[1] ?? match[2] ?? match[3] ?? match[4];
-    const title = stripHtml(titleHtml);
+    let title;
+    if (match[2] !== undefined) {
+      // Bare <strong>...</strong> candidate - only a real heading if its
+      // own text is short/title-like AND a list immediately follows.
+      const strongText = stripHtml(match[2]);
+      const looksLikeTitle = strongText && strongText.length <= 80 && !/[.!?]\s*$/.test(strongText.trim());
+      if (!looksLikeTitle || !isFollowedByList(html, match.index + match[0].length)) continue;
+      title = strongText;
+    } else {
+      title = stripHtml(match[1] ?? match[3] ?? match[4]);
+    }
     // Wipro pads some sections with a heading containing only the invisible
     // Unicode combining-grapheme-joiner character "͏" - stripHtml doesn't
     // reduce it to '', so it needs an explicit check to be skipped here.
