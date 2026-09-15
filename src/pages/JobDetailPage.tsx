@@ -200,36 +200,40 @@ export const JobDetailPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Responsibilities */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
-              <h2 className="text-base font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                Key Responsibilities
-              </h2>
-              <ul className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
-                {job.responsibilities.map((resp, i) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-                    <span className="leading-relaxed">{resp}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {/* Responsibilities (only shown when the source provided a structured list) */}
+            {job.responsibilities && job.responsibilities.length > 0 && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  Key Responsibilities
+                </h2>
+                <ul className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+                  {job.responsibilities.map((resp, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                      <span className="leading-relaxed">{resp}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-            {/* Minimum Requirements */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
-              <h2 className="text-base font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4">
-                Core Requirements
-              </h2>
-              <ul className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
-                {job.requirements.map((req, i) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400 shrink-0 mt-2" />
-                    <span className="leading-relaxed">{req}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {/* Minimum Requirements (only shown when the source provided a structured list) */}
+            {job.requirements && job.requirements.length > 0 && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4">
+                  Core Requirements
+                </h2>
+                <ul className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+                  {job.requirements.map((req, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400 shrink-0 mt-2" />
+                      <span className="leading-relaxed">{req}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Preferred Qualifications if present */}
             {job.qualifications && job.qualifications.length > 0 && (
