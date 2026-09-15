@@ -424,34 +424,74 @@ export async function fetchZohoRecruit(company) {
   }));
 }
 
+// Finds the index of the closing tag matching the opening tag whose content
+// starts at `contentStart` (right after that tag's ">"), tracking nested
+// same-named tags so an inner <span>...</span> (very common here - list
+// items and even single words get wrapped in their own <span>) doesn't get
+// mistaken for the outer span's close. A plain non-greedy regex badly
+// truncates content on any page that nests spans this way.
+function findMatchingClose(html, contentStart, tagName) {
+  const openRe = new RegExp(`<${tagName}(?=[\\s>])`, 'gi');
+  const closeStr = `</${tagName}>`;
+  let depth = 1;
+  let searchFrom = contentStart;
+  while (depth > 0) {
+    openRe.lastIndex = searchFrom;
+    const openMatch = openRe.exec(html);
+    const closeIdx = html.indexOf(closeStr, searchFrom);
+    if (closeIdx === -1) return html.length;
+    if (openMatch && openMatch.index < closeIdx) {
+      depth++;
+      searchFrom = openMatch.index + openMatch[0].length;
+    } else {
+      depth--;
+      if (depth === 0) return closeIdx;
+      searchFrom = closeIdx + closeStr.length;
+    }
+  }
+  return html.length;
+}
+
 // The Phenom/Job2Web job detail page is plain server-rendered HTML - the
 // list/search API has no description field at all, so this is the only way
-// to get real content. The page layout is not consistent across companies:
-//  - Some (e.g. Wipro) render the real job body under a "Job Description:"
-//    label, in a plain <span class="rtltextaligneligible"> with NO itemprop
-//    attribute; their itemprop="description" spans instead hold generic
-//    company-boilerplate text, not the actual job content.
-//  - Others (e.g. HCLTech) have no such label and put the real content
-//    directly in the (only) itemprop="description" span.
-// So: prefer the label-anchored span when the label exists, and only fall
-// back to itemprop="description" when it doesn't.
+// to get real content. The page layout is NOT consistent even within the
+// same company: some jobs put the real body in a plain
+// <span class="rtltextaligneligible"> (no itemprop) right after a
+// "Job Description:" label, while their itemprop="description" spans hold
+// generic company boilerplate; OTHER jobs on the very same company leave
+// that labeled span empty/placeholder and put the entire real body in an
+// itemprop="description" span instead - sometimes across multiple such
+// spans, only one of which is real.
+//
+// There's no reliable structural signal for which case applies, so instead
+// of guessing based on "does the label exist", every candidate span is
+// extracted (depth-aware) and the longest one (by plain-text length) wins -
+// boilerplate and empty/placeholder spans are always much shorter than an
+// actual job description.
 function extractPhenomDescription(html) {
+  const candidates = [];
+
   const labelIdx = html.indexOf('>Job Description:');
   if (labelIdx !== -1) {
     const afterLabel = html.slice(labelIdx);
     const spanMatch = afterLabel.match(/<span[^>]*class="rtltextaligneligible"[^>]*>/);
     if (spanMatch) {
       const contentStart = labelIdx + spanMatch.index + spanMatch[0].length;
-      // The next "joblayouttoken displayDTM" block marks the start of the
-      // next labeled field, so it's a reliable end boundary regardless of
-      // how many nested <div>s the description itself contains.
-      const nextTokenIdx = html.indexOf('<div class="joblayouttoken displayDTM', contentStart);
-      const end = nextTokenIdx === -1 ? contentStart + 20000 : nextTokenIdx;
-      return html.slice(contentStart, end);
+      candidates.push(html.slice(contentStart, findMatchingClose(html, contentStart, 'span')));
     }
   }
-  const matches = [...html.matchAll(/itemprop="description"[^>]*>([\s\S]*?)<\/span>/g)];
-  return matches.length > 0 ? matches[matches.length - 1][1] : null;
+
+  const itempropRe = /itemprop="description"[^>]*>/g;
+  let m;
+  while ((m = itempropRe.exec(html)) !== null) {
+    const contentStart = m.index + m[0].length;
+    candidates.push(html.slice(contentStart, findMatchingClose(html, contentStart, 'span')));
+  }
+
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, current) =>
+    stripHtml(current).length > stripHtml(best).length ? current : best
+  );
 }
 
 // Splits the raw description HTML into (heading, content) sections using
