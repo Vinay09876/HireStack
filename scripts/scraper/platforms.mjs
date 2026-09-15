@@ -454,6 +454,118 @@ function extractPhenomDescription(html) {
   return matches.length > 0 ? matches[matches.length - 1][1] : null;
 }
 
+// Splits the raw description HTML into (heading, content) sections using
+// <h1-6> tags as boundaries (covers both Wipro's <h4> and HCLTech's
+// <H2 style=...> patterns) - content before the first heading has no
+// heading and is treated as an intro paragraph.
+function splitIntoSections(html) {
+  const headingRe = /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi;
+  const sections = [];
+  let lastIndex = 0;
+  let lastHeading = null;
+  let match;
+  while ((match = headingRe.exec(html)) !== null) {
+    if (lastHeading !== null) {
+      sections.push({ heading: lastHeading, content: html.slice(lastIndex, match.index) });
+    } else {
+      const intro = html.slice(lastIndex, match.index);
+      if (stripHtml(intro)) sections.push({ heading: null, content: intro });
+    }
+    lastHeading = stripHtml(match[1]);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastHeading !== null) {
+    sections.push({ heading: lastHeading, content: html.slice(lastIndex) });
+  }
+  return sections;
+}
+
+// Extracts only the TOP-LEVEL <li> items from a chunk of list HTML,
+// depth-tracked so a nested <ul> inside one <li> (e.g. Wipro's
+// "Hands-on experience with: <ul>...</ul>") stays part of that single
+// item instead of being split into separate top-level entries.
+function extractTopLevelListItems(html) {
+  const items = [];
+  let depth = 0;
+  let i = 0;
+  let current = '';
+  let capturing = false;
+  while (i < html.length) {
+    if (/^<li[\s>]/i.test(html.slice(i, i + 4))) {
+      const tagEnd = html.indexOf('>', i) + 1;
+      if (depth === 0) {
+        capturing = true;
+        current = '';
+      } else if (capturing) {
+        current += html.slice(i, tagEnd);
+      }
+      depth++;
+      i = tagEnd;
+      continue;
+    }
+    if (html.slice(i, i + 5).toLowerCase() === '</li>') {
+      depth--;
+      if (depth === 0) {
+        items.push(current);
+        capturing = false;
+      } else if (capturing) {
+        current += '</li>';
+      }
+      i += 5;
+      continue;
+    }
+    if (capturing) current += html[i];
+    i++;
+  }
+  if (items.length > 0) return items.map((item) => stripHtml(item)).filter(Boolean);
+
+  // No <li> markup at all - some templates (e.g. HCLTech) use plain
+  // "<br>1. ..." numbered lines instead of a real list.
+  return stripHtml(html)
+    .split(/\n+/)
+    .map((line) => line.trim().replace(/^\d+\.\s*/, ''))
+    .filter((line) => line && line !== 'null');
+}
+
+// Classifies each section by its heading text into the same
+// responsibilities/requirements/qualifications shape the rest of the
+// scraper already uses (see Lever's adapter), falling back to plain
+// prose in the description for anything unrecognized (overview, summary).
+function classifyPhenomSections(sections) {
+  const responsibilities = [];
+  const requirements = [];
+  const qualifications = [];
+  const introParts = [];
+
+  for (const { heading, content } of sections) {
+    if (heading === null) {
+      const text = stripHtml(content);
+      if (text) introParts.push(text);
+      continue;
+    }
+    const h = heading.toLowerCase();
+    if (/responsibilit/.test(h)) {
+      responsibilities.push(...extractTopLevelListItems(content));
+    } else if (/required skill|mandatory|^requirement/.test(h)) {
+      requirements.push(...extractTopLevelListItems(content));
+    } else if (/preferred|good to have|nice to have|desirable/.test(h)) {
+      qualifications.push(...extractTopLevelListItems(content));
+    } else if (/^job description$/.test(h)) {
+      // Wipro wraps everything in an outer "Job Description" <H2> that's
+      // purely structural (immediately followed by the title repeated as
+      // plain text) - it isn't real section content, skip the label itself
+      // but keep the paragraph that follows.
+      const text = stripHtml(content);
+      if (text) introParts.push(text);
+    } else {
+      const text = stripHtml(content);
+      if (text) introParts.push(`${heading}\n${text}`);
+    }
+  }
+
+  return { description: introParts.join('\n\n'), responsibilities, requirements, qualifications };
+}
+
 async function fetchPhenomJobDetail(applicationUrl) {
   const res = await fetch(applicationUrl, {
     headers: { 'User-Agent': USER_AGENT },
@@ -466,7 +578,24 @@ async function fetchPhenomJobDetail(applicationUrl) {
   const html = await res.text();
   const raw = extractPhenomDescription(html);
   if (!raw) throw new Error(`${applicationUrl} -> no description found (likely redirected to an error page)`);
-  return stripHtml(raw);
+  const sections = splitIntoSections(raw);
+  const classified = classifyPhenomSections(sections);
+  const hasStructuredContent =
+    classified.responsibilities.length > 0 ||
+    classified.requirements.length > 0 ||
+    classified.qualifications.length > 0;
+  if (!classified.description) {
+    // No unheaded "overview"-style prose came through. If nothing was
+    // structured either, fall back to a flat strip of the whole block; if
+    // real content did land in the structured lists, a short generic line
+    // is enough - the real content is fully visible in those sections and
+    // the caller's own placeholder fallback (`description || ...`) only
+    // triggers on a genuinely empty string, not on this.
+    classified.description = hasStructuredContent
+      ? 'See the sections below for full role details.'
+      : stripHtml(raw);
+  }
+  return classified;
 }
 
 export async function fetchPhenomJobStream(company) {
@@ -526,7 +655,11 @@ export async function fetchPhenomJobStream(company) {
     await Promise.all(
       batch.map(async (job) => {
         try {
-          job.description = await fetchPhenomJobDetail(job.applicationUrl);
+          const detail = await fetchPhenomJobDetail(job.applicationUrl);
+          job.description = detail.description;
+          job.responsibilities = detail.responsibilities;
+          job.requirements = detail.requirements;
+          job.qualifications = detail.qualifications;
         } catch (err) {
           console.warn(`  Phenom detail fetch failed for ${company.name} ${job.applicationUrl}: ${err.message}`);
         }
