@@ -495,27 +495,36 @@ function extractPhenomDescription(html) {
 }
 
 // Splits the raw description HTML into (heading, content) sections. Section
-// titles show up in at least three different markups across Wipro/HCLTech
-// templates:
+// titles show up in at least four different markups seen across Wipro/
+// HCLTech templates:
 //  - real <h1-6> tags (covers Wipro's <h4> and HCLTech's <H2 style=...>)
 //  - a <p> whose entire content is bold text and nothing else, e.g.
-//    <p><strong><span>Key Responsibilities</span></strong></p> - a title
-//    paragraph like this is always immediately followed by a <ul>/<ol>, so
-//    that combination (not "any bold text") is what's matched, to avoid
-//    treating an inline bolded word/phrase inside real prose as a heading.
+//    <p><strong><span>Key Responsibilities</span></strong></p>, always
+//    immediately followed by a <ul>/<ol> - that adjacency (not "any bold
+//    text") is what's matched, to avoid treating an inline bolded phrase
+//    inside real prose as a heading.
+//  - a numbered <p> whose main content is bold, e.g.
+//    <p>1.<strong> Practice Growth and Revenue Leadership</strong></p> or
+//    <p><strong>2. Commercial Modeling</strong></p> - here the section's
+//    "list" is just several more plain <p> sentences, not a real <ul>, so
+//    no list-adjacency check applies; the leading number is itself
+//    distinctive enough not to false-positive on inline bold prose.
 // Content before the first recognized heading has no heading and is kept
 // as an intro paragraph.
 function splitIntoSections(html) {
   const headingRe =
-    /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<p[^>]*>\s*<strong>([\s\S]*?)<\/strong>\s*<\/p>\s*(?=<[uo]l[\s>])/gi;
+    /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<p[^>]*>\s*<strong>([\s\S]*?)<\/strong>\s*<\/p>\s*(?=<[uo]l[\s>])|<p[^>]*>\s*(\d+\.\s*<strong>[\s\S]*?<\/strong>)\s*<\/p>|<p[^>]*>(<strong>\s*\d+\.[^<]*<\/strong>)\s*<\/p>/gi;
   const sections = [];
   let lastIndex = 0;
   let lastHeading = null;
   let match;
   while ((match = headingRe.exec(html)) !== null) {
-    const titleHtml = match[1] ?? match[2];
+    const titleHtml = match[1] ?? match[2] ?? match[3] ?? match[4];
     const title = stripHtml(titleHtml);
-    if (!title) continue; // e.g. Wipro's invisible-character "͏" placeholder headings
+    // Wipro pads some sections with a heading containing only the invisible
+    // Unicode combining-grapheme-joiner character "͏" - stripHtml doesn't
+    // reduce it to '', so it needs an explicit check to be skipped here.
+    if (!title || title === '͏') continue;
     if (lastHeading !== null) {
       sections.push({ heading: lastHeading, content: html.slice(lastIndex, match.index) });
     } else {
@@ -568,25 +577,41 @@ function extractTopLevelListItems(html) {
     if (capturing) current += html[i];
     i++;
   }
-  if (items.length > 0) return items.map((item) => stripHtml(item)).filter(Boolean);
+  // Wipro pads some sections with invisible-character "͏" placeholder
+  // paragraphs (visible as an empty-looking bullet/line) - drop them here
+  // so they never surface as a responsibility/requirement item.
+  const isRealText = (s) => s && s !== '͏' && s !== 'null';
 
-  // No <li> markup at all - some templates (e.g. HCLTech) use plain
-  // "<br>1. ..." numbered lines instead of a real list.
+  if (items.length > 0) return items.map((item) => stripHtml(item)).filter(isRealText);
+
+  // No <li> markup at all - some templates use plain "<br>1. ..." numbered
+  // lines, or (Wipro) several consecutive <p> sentences, instead of a real
+  // list; stripHtml already turns both </p> and <br> into newlines.
   return stripHtml(html)
     .split(/\n+/)
     .map((line) => line.trim().replace(/^\d+\.\s*/, ''))
-    .filter((line) => line && line !== 'null');
+    .filter(isRealText);
 }
 
 // Classifies each section by its heading text into the same
 // responsibilities/requirements/qualifications shape the rest of the
 // scraper already uses (see Lever's adapter), falling back to plain
 // prose in the description for anything unrecognized (overview, summary).
+//
+// One Wipro template nests headings: a top-level "Do" <h2> is immediately
+// followed by several sibling <h3> headings, each one naming a single
+// responsibility area (with further nested detail bullets under it that
+// are too granular to surface as separate list items). splitIntoSections
+// flattens all of these into one heading per <h1-6>, so once "Do" is seen,
+// every subsequent heading up to the next *recognized* section keyword is
+// actually one responsibility bullet, not its own section - each such
+// heading's title becomes the bullet text.
 function classifyPhenomSections(sections) {
   const responsibilities = [];
   const requirements = [];
   const qualifications = [];
   const introParts = [];
+  let inDoBlock = false;
 
   for (const { heading, content } of sections) {
     if (heading === null) {
@@ -600,6 +625,22 @@ function classifyPhenomSections(sections) {
     // "these are responsibility areas" since the titles vary per job.
     const isNumberedSection = /^\d+\.\s/.test(heading);
     const h = heading.toLowerCase().replace(/^\d+\.\s*/, '');
+
+    if (/^do$/.test(h)) {
+      inDoBlock = true;
+      continue;
+    }
+    if (inDoBlock) {
+      // Stop treating headings as "Do" bullets once a differently-labeled
+      // real section starts (e.g. some jobs follow "Do" with "Deliver").
+      if (/^deliver$/.test(h) || /required skill|mandatory|^requirement|preferred|qualification/.test(h)) {
+        inDoBlock = false;
+      } else {
+        if (heading !== '͏') responsibilities.push(heading);
+        continue;
+      }
+    }
+
     if (isNumberedSection || /responsibilit/.test(h)) {
       responsibilities.push(...extractTopLevelListItems(content));
     } else if (
