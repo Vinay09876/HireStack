@@ -494,24 +494,35 @@ function extractPhenomDescription(html) {
   );
 }
 
-// Splits the raw description HTML into (heading, content) sections using
-// <h1-6> tags as boundaries (covers both Wipro's <h4> and HCLTech's
-// <H2 style=...> patterns) - content before the first heading has no
-// heading and is treated as an intro paragraph.
+// Splits the raw description HTML into (heading, content) sections. Section
+// titles show up in at least three different markups across Wipro/HCLTech
+// templates:
+//  - real <h1-6> tags (covers Wipro's <h4> and HCLTech's <H2 style=...>)
+//  - a <p> whose entire content is bold text and nothing else, e.g.
+//    <p><strong><span>Key Responsibilities</span></strong></p> - a title
+//    paragraph like this is always immediately followed by a <ul>/<ol>, so
+//    that combination (not "any bold text") is what's matched, to avoid
+//    treating an inline bolded word/phrase inside real prose as a heading.
+// Content before the first recognized heading has no heading and is kept
+// as an intro paragraph.
 function splitIntoSections(html) {
-  const headingRe = /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi;
+  const headingRe =
+    /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<p[^>]*>\s*<strong>([\s\S]*?)<\/strong>\s*<\/p>\s*(?=<[uo]l[\s>])/gi;
   const sections = [];
   let lastIndex = 0;
   let lastHeading = null;
   let match;
   while ((match = headingRe.exec(html)) !== null) {
+    const titleHtml = match[1] ?? match[2];
+    const title = stripHtml(titleHtml);
+    if (!title) continue; // e.g. Wipro's invisible-character "͏" placeholder headings
     if (lastHeading !== null) {
       sections.push({ heading: lastHeading, content: html.slice(lastIndex, match.index) });
     } else {
       const intro = html.slice(lastIndex, match.index);
       if (stripHtml(intro)) sections.push({ heading: null, content: intro });
     }
-    lastHeading = stripHtml(match[1]);
+    lastHeading = title;
     lastIndex = match.index + match[0].length;
   }
   if (lastHeading !== null) {
@@ -583,12 +594,19 @@ function classifyPhenomSections(sections) {
       if (text) introParts.push(text);
       continue;
     }
-    const h = heading.toLowerCase();
-    if (/responsibilit/.test(h)) {
+    // A leading "1. "/"2. " numbering (e.g. Wipro's "2. Commercial Modeling
+    // & Deal Structuring") marks a numbered focus-area breakdown - that
+    // structural pattern, not the specific title text, is what signals
+    // "these are responsibility areas" since the titles vary per job.
+    const isNumberedSection = /^\d+\.\s/.test(heading);
+    const h = heading.toLowerCase().replace(/^\d+\.\s*/, '');
+    if (isNumberedSection || /responsibilit/.test(h)) {
       responsibilities.push(...extractTopLevelListItems(content));
-    } else if (/required skill|mandatory|^requirement/.test(h)) {
+    } else if (
+      /required skill|mandatory|^requirement|ideal candidate|candidate profile/.test(h)
+    ) {
       requirements.push(...extractTopLevelListItems(content));
-    } else if (/preferred|good to have|nice to have|desirable/.test(h)) {
+    } else if (/preferred|good to have|nice to have|desirable|^qualification/.test(h)) {
       qualifications.push(...extractTopLevelListItems(content));
     } else if (/^job description$/.test(h)) {
       // Wipro wraps everything in an outer "Job Description" <H2> that's
