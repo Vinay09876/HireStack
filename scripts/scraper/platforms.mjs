@@ -424,6 +424,25 @@ export async function fetchZohoRecruit(company) {
   }));
 }
 
+// The Phenom/Job2Web job detail page is plain server-rendered HTML with the
+// full description marked up as schema.org microdata
+// (<span itemprop="description">...</span>) - the list/search API has no
+// description field at all, so this is the only way to get real content.
+async function fetchPhenomJobDetail(applicationUrl) {
+  const res = await fetch(applicationUrl, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  // A malformed/expired job URL redirects to a generic error page but still
+  // returns HTTP 200, so a missing description match must also be treated
+  // as a failure - otherwise it silently persists as an empty description.
+  if (!res.ok) throw new Error(`${applicationUrl} -> HTTP ${res.status}`);
+  const html = await res.text();
+  const match = html.match(/itemprop="description"[^>]*>([\s\S]*?)<\/span>/);
+  if (!match) throw new Error(`${applicationUrl} -> no description found (likely redirected to an error page)`);
+  return stripHtml(match[1]);
+}
+
 export async function fetchPhenomJobStream(company) {
   const jobs = [];
   let pageNumber = 0;
@@ -452,7 +471,8 @@ export async function fetchPhenomJobStream(company) {
     if (batch.length < 10) break;
     await sleep(PAGE_DELAY_MS);
   }
-  return jobs.map((job) => {
+
+  const results = jobs.map((job) => {
     const cities = job.jobLocationShort || job.custprimecity || [];
     const rawLocation = Array.isArray(cities) ? cities[0] : cities;
     const location = (rawLocation || '').replace(/<br\/?>/g, '').trim() || 'India';
@@ -462,10 +482,29 @@ export async function fetchPhenomJobStream(company) {
       location,
       department: null,
       postedDate: null,
-      applicationUrl: `https://${company.phenomHost}/job/${job.urlTitle}/${job.id}`,
+      // The locale suffix is required - without it the site silently
+      // redirects to a generic error page (still HTTP 200, no description).
+      applicationUrl: `https://${company.phenomHost}/job/${job.urlTitle}/${job.id}-en_US`,
       isRemote: /remote/i.test(location),
     };
   });
+
+  const DETAIL_CONCURRENCY = 5;
+  for (let i = 0; i < results.length; i += DETAIL_CONCURRENCY) {
+    const batch = results.slice(i, i + DETAIL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (job) => {
+        try {
+          job.description = await fetchPhenomJobDetail(job.applicationUrl);
+        } catch (err) {
+          console.warn(`  Phenom detail fetch failed for ${company.name} ${job.applicationUrl}: ${err.message}`);
+        }
+      })
+    );
+    if (i + DETAIL_CONCURRENCY < results.length) await sleep(PAGE_DELAY_MS);
+  }
+
+  return results;
 }
 
 export async function fetchInfosysCustom() {
