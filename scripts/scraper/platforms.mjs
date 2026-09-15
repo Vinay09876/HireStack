@@ -21,6 +21,15 @@ function decodeEntities(str) {
     .replace(/&gt;/g, '>')
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
+    // Named entities beyond the basic set (e.g. Capgemini's "you&rsquo;d")
+    .replace(/&rsquo;/g, '’')
+    .replace(/&lsquo;/g, '‘')
+    .replace(/&rdquo;/g, '”')
+    .replace(/&ldquo;/g, '“')
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—')
+    .replace(/&hellip;/g, '…')
+    .replace(/&bull;/g, '•')
     // Numeric entities (e.g. Mastercard's "200&#43;countries" -> "200+countries")
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
@@ -785,6 +794,46 @@ export async function fetchInfosysCustom() {
   }));
 }
 
+// Capgemini's list API already returns the full job description as HTML
+// (unlike Workday/Phenom, which need a separate per-job detail fetch) -
+// consistently split into <H2>-titled sections. Titles vary in trailing
+// punctuation/casing but reliably start with "Your Role" (responsibilities)
+// or "Your Profile"/"Your Skills" (requirements); anything else (company
+// boilerplate, "What you'll love...", "About Capgemini") is skipped rather
+// than kept as prose, since it's marketing copy, not job content.
+function classifyCapgeminiDescription(html) {
+  if (!html) return { description: '', responsibilities: [], requirements: [] };
+  const sections = splitIntoSections(html);
+  const responsibilities = [];
+  const requirements = [];
+  const introParts = [];
+
+  for (const { heading, content } of sections) {
+    if (heading === null) {
+      const text = stripHtml(content);
+      if (text) introParts.push(text);
+      continue;
+    }
+    const h = heading.toLowerCase();
+    if (/^your role/.test(h)) {
+      responsibilities.push(...extractTopLevelListItems(content));
+    } else if (/^your (profile|skills)/.test(h)) {
+      requirements.push(...extractTopLevelListItems(content));
+    }
+    // Anything else (intro boilerplate, "What you'll love...", "About
+    // Capgemini") is marketing copy, not job content - skipped entirely.
+  }
+
+  let description = introParts.join('\n\n');
+  if (!description) {
+    description =
+      responsibilities.length > 0 || requirements.length > 0
+        ? 'See the sections below for full role details.'
+        : stripHtml(html);
+  }
+  return { description, responsibilities, requirements };
+}
+
 export async function fetchCapgeminiCustom() {
   const jobs = [];
   let page = 1;
@@ -800,15 +849,21 @@ export async function fetchCapgeminiCustom() {
     if (batch.length < size) break;
     await sleep(PAGE_DELAY_MS);
   }
-  return jobs.map((job) => ({
-    externalId: job.id,
-    title: job.title || job.job_title,
-    location: job.city || job.location || 'India',
-    department: job.brand || null,
-    postedDate: job.posted_date ? job.posted_date.slice(0, 10) : null,
-    applicationUrl: job.apply_url || job.url || 'https://www.capgemini.com/in-en/careers/',
-    isRemote: /remote/i.test(job.city || job.location || ''),
-  }));
+  return jobs.map((job) => {
+    const { description, responsibilities, requirements } = classifyCapgeminiDescription(job.description);
+    return {
+      externalId: job.id,
+      title: job.title || job.job_title,
+      location: job.city || job.location || 'India',
+      department: job.brand || null,
+      postedDate: job.posted_date ? job.posted_date.slice(0, 10) : null,
+      applicationUrl: job.apply_url || job.url || 'https://www.capgemini.com/in-en/careers/',
+      description: description || undefined,
+      responsibilities,
+      requirements,
+      isRemote: /remote/i.test(job.city || job.location || ''),
+    };
+  });
 }
 
 export async function fetchDarwinbox(company) {
