@@ -67,7 +67,9 @@ async function deactivateMissingJobs(companyId, activeIds) {
 // requests already time out and retry inside fetchJson(), but this is a
 // backstop so a company that keeps paginating (or any other runaway loop)
 // can never stall the whole scheduled run.
-const COMPANY_TIMEOUT_MS = 120000;
+// Workday companies with many India postings now also fetch a per-job
+// detail page for a real description, so this needs real headroom.
+const COMPANY_TIMEOUT_MS = 300000;
 
 function withTimeout(promise, ms, label) {
   return Promise.race([

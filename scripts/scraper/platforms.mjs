@@ -21,6 +21,9 @@ function decodeEntities(str) {
     .replace(/&gt;/g, '>')
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
+    // Numeric entities (e.g. Mastercard's "200&#43;countries" -> "200+countries")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&amp;/g, '&');
 }
 
@@ -160,6 +163,23 @@ export async function fetchSmartRecruiters(company) {
   });
 }
 
+const WORKDAY_INDIA_HINTS = [
+  'india', 'bengaluru', 'bangalore', 'hyderabad', 'mumbai', 'pune', 'chennai',
+  'gurugram', 'gurgaon', 'noida', 'delhi', 'kolkata', 'ahmedabad',
+];
+
+// Workday's list endpoint returns no description at all - only the detail
+// endpoint (one request per job) has the real jobDescription HTML. Fetching
+// that for every job across every country would be very expensive, so we
+// filter to India-looking postings first and only fetch details for those.
+async function fetchWorkdayJobDetail(company, externalPath) {
+  // externalPath already starts with "/job/..." from the list response.
+  const url = `https://${company.workdayHost}/wday/cxs/${company.platformId}/${company.workdaySite}${externalPath}`;
+  const data = await fetchJson(url);
+  const info = data.jobPostingInfo || {};
+  return stripHtml(info.jobDescription || '');
+}
+
 export async function fetchWorkday(company) {
   const jobs = [];
   let offset = 0;
@@ -178,15 +198,52 @@ export async function fetchWorkday(company) {
     if (batch.length < limit) break;
     await sleep(PAGE_DELAY_MS);
   }
-  return jobs.map((job) => ({
-    externalId: job.bulletFields?.[0] || job.externalPath,
-    title: job.title,
-    location: job.locationsText || '',
-    department: null,
-    postedDate: null, // Workday only gives relative text like "Posted 2 Days Ago"; left null, not worth mis-parsing
-    applicationUrl: `https://${company.workdayHost}/${company.workdaySite}${job.externalPath}`,
-    isRemote: /remote/i.test(job.locationsText || ''),
-  }));
+
+  const india = [];
+  const nonIndia = [];
+  for (const job of jobs) {
+    const locationsText = job.locationsText || '';
+    const isIndiaLooking = WORKDAY_INDIA_HINTS.some((hint) => locationsText.toLowerCase().includes(hint));
+    (isIndiaLooking ? india : nonIndia).push(job);
+  }
+
+  // Detail fetches only run for India-looking postings (list-only for the
+  // rest keeps request volume down), in small concurrent batches so a
+  // company with hundreds of India jobs doesn't take minutes sequentially.
+  const DETAIL_CONCURRENCY = 5;
+  const descriptionByPath = new Map();
+  for (let i = 0; i < india.length; i += DETAIL_CONCURRENCY) {
+    const batch = india.slice(i, i + DETAIL_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (job) => {
+        if (!job.externalPath) return null;
+        try {
+          return [job.externalPath, await fetchWorkdayJobDetail(company, job.externalPath)];
+        } catch (err) {
+          console.warn(`  Workday detail fetch failed for ${company.name} ${job.externalPath}: ${err.message}`);
+          return null;
+        }
+      })
+    );
+    for (const entry of batchResults) {
+      if (entry) descriptionByPath.set(entry[0], entry[1]);
+    }
+    if (i + DETAIL_CONCURRENCY < india.length) await sleep(PAGE_DELAY_MS);
+  }
+
+  return jobs.map((job) => {
+    const locationsText = job.locationsText || '';
+    return {
+      externalId: job.bulletFields?.[0] || job.externalPath,
+      title: job.title,
+      location: locationsText,
+      department: null,
+      postedDate: null, // Workday only gives relative text like "Posted 2 Days Ago"; left null, not worth mis-parsing
+      applicationUrl: `https://${company.workdayHost}/${company.workdaySite}${job.externalPath}`,
+      description: descriptionByPath.get(job.externalPath) || undefined,
+      isRemote: /remote/i.test(locationsText),
+    };
+  });
 }
 
 export async function fetchOracleHcm(company) {
