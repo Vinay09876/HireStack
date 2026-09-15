@@ -476,6 +476,11 @@ export async function fetchPhenomJobStream(company) {
     const cities = job.jobLocationShort || job.custprimecity || [];
     const rawLocation = Array.isArray(cities) ? cities[0] : cities;
     const location = (rawLocation || '').replace(/<br\/?>/g, '').trim() || 'India';
+    // urlTitle comes back HTML-entity-encoded for titles with special chars
+    // (e.g. "...Zscaler-&amp;-Palo-Alto..." for a title containing "&") -
+    // decoding it first is required, otherwise the literal "&amp;" breaks
+    // the URL and the detail page silently 200s to a generic error page.
+    const urlTitle = decodeEntities(job.urlTitle || job.unifiedUrlTitle || '');
     return {
       externalId: job.id,
       title: job.unifiedStandardTitle || job.unifiedUrlTitle,
@@ -484,7 +489,7 @@ export async function fetchPhenomJobStream(company) {
       postedDate: null,
       // The locale suffix is required - without it the site silently
       // redirects to a generic error page (still HTTP 200, no description).
-      applicationUrl: `https://${company.phenomHost}/job/${job.urlTitle}/${job.id}-en_US`,
+      applicationUrl: `https://${company.phenomHost}/job/${urlTitle}/${job.id}-en_US`,
       isRemote: /remote/i.test(location),
     };
   });
