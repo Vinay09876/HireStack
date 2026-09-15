@@ -143,6 +143,21 @@ export async function fetchLever(company) {
   });
 }
 
+// SmartRecruiters' list endpoint has no description; the per-job detail
+// endpoint returns it as jobAd.sections.jobDescription (the real role
+// content) and jobAd.sections.qualifications (candidate requirements) -
+// both HTML, sometimes using real <ul><li> lists and sometimes plain <p>
+// paragraphs prefixed with a literal "■" bullet character (both handled by
+// extractTopLevelListItems).
+async function fetchSmartRecruitersJobDetail(companyId, jobId) {
+  const data = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${companyId}/postings/${jobId}`);
+  const sections = data.jobAd?.sections || {};
+  return {
+    description: sections.jobDescription?.text || '',
+    requirements: sections.qualifications?.text ? extractTopLevelListItems(sections.qualifications.text) : [],
+  };
+}
+
 export async function fetchSmartRecruiters(company) {
   const jobs = [];
   let offset = 0;
@@ -157,7 +172,7 @@ export async function fetchSmartRecruiters(company) {
     if (batch.length < limit) break;
     await sleep(PAGE_DELAY_MS);
   }
-  return jobs.map((job) => {
+  const results = jobs.map((job) => {
     const loc = job.location || {};
     const locationStr = [loc.city, loc.region, loc.country].filter(Boolean).join(', ');
     return {
@@ -170,6 +185,25 @@ export async function fetchSmartRecruiters(company) {
       isRemote: loc.remote === true,
     };
   });
+
+  const DETAIL_CONCURRENCY = 5;
+  for (let i = 0; i < results.length; i += DETAIL_CONCURRENCY) {
+    const batch = results.slice(i, i + DETAIL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (job) => {
+        try {
+          const detail = await fetchSmartRecruitersJobDetail(company.platformId, job.externalId);
+          job.description = stripHtml(detail.description) || undefined;
+          job.requirements = detail.requirements;
+        } catch (err) {
+          console.warn(`  SmartRecruiters detail fetch failed for ${company.name} ${job.externalId}: ${err.message}`);
+        }
+      })
+    );
+    if (i + DETAIL_CONCURRENCY < results.length) await sleep(PAGE_DELAY_MS);
+  }
+
+  return results;
 }
 
 const WORKDAY_INDIA_HINTS = [
@@ -590,15 +624,18 @@ function extractTopLevelListItems(html) {
   // paragraphs (visible as an empty-looking bullet/line) - drop them here
   // so they never surface as a responsibility/requirement item.
   const isRealText = (s) => s && s !== '͏' && s !== 'null';
+  // Some templates (e.g. Swiggy/SmartRecruiters) use a literal "■" bullet
+  // character at the start of a plain <p>, instead of real <li> markup.
+  const cleanLine = (s) => s.replace(/^[■•·▪]\s*/, '');
 
-  if (items.length > 0) return items.map((item) => stripHtml(item)).filter(isRealText);
+  if (items.length > 0) return items.map((item) => cleanLine(stripHtml(item))).filter(isRealText);
 
   // No <li> markup at all - some templates use plain "<br>1. ..." numbered
   // lines, or (Wipro) several consecutive <p> sentences, instead of a real
   // list; stripHtml already turns both </p> and <br> into newlines.
   return stripHtml(html)
     .split(/\n+/)
-    .map((line) => line.trim().replace(/^\d+\.\s*/, ''))
+    .map((line) => cleanLine(line.trim().replace(/^\d+\.\s*/, '')))
     .filter(isRealText);
 }
 
