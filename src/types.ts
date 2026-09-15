@@ -52,3 +52,9 @@ export interface UserProfile {
   bio: string;
   notificationsEnabled: boolean;
 }
+
+export interface JobAlert {
+  role: string;
+  skills: string[];
+  experienceLevel: ExperienceLevel;
+}

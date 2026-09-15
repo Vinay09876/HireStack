@@ -127,3 +127,49 @@ create policy "Users can save jobs for themselves"
 create policy "Users can remove their own saved jobs"
   on public.saved_jobs for delete
   using (auth.uid() = user_id);
+
+-- ============================================================
+-- job_alerts (one saved alert profile per user)
+-- ============================================================
+create table if not exists public.job_alerts (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  role text not null,
+  skills text[] not null default '{}',
+  experience_level text not null check (experience_level in ('Entry', 'Mid', 'Senior', 'Lead')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ============================================================
+-- job_alert_sent (tracks which jobs were already emailed to a user,
+-- so the daily digest never repeats a job across runs)
+-- ============================================================
+create table if not exists public.job_alert_sent (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  job_id text not null references public.jobs(id) on delete cascade,
+  sent_at timestamptz not null default now(),
+  primary key (user_id, job_id)
+);
+
+alter table public.job_alerts enable row level security;
+alter table public.job_alert_sent enable row level security;
+
+-- job_alerts: users can only manage their own alert preference
+create policy "Users can view their own job alert"
+  on public.job_alerts for select
+  using (auth.uid() = user_id);
+
+create policy "Users can create their own job alert"
+  on public.job_alerts for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update their own job alert"
+  on public.job_alerts for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete their own job alert"
+  on public.job_alerts for delete
+  using (auth.uid() = user_id);
+
+-- job_alert_sent has no public policies: it's only ever written by the
+-- server-side digest script using the service_role key, which bypasses RLS.

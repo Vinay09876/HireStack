@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Building2,
   Search,
+  Bell,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useJob } from '../context/JobContext';
@@ -67,6 +68,9 @@ export const Header: React.FC = () => {
               </NavLink>
               <NavLink to="/companies" className={navLinkClass}>
                 Companies
+              </NavLink>
+              <NavLink to="/job-alerts" className={navLinkClass}>
+                Job Alerts
               </NavLink>
               <NavLink to="/dashboard" className={navLinkClass}>
                 Dashboard
@@ -158,6 +162,14 @@ export const Header: React.FC = () => {
                           <User className="w-3.5 h-3.5 text-slate-400" />
                           <span>Job Preferences</span>
                         </Link>
+                        <Link
+                          to="/job-alerts"
+                          onClick={() => setUserDropdownOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors"
+                        >
+                          <Bell className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Job Alerts</span>
+                        </Link>
                       </div>
 
                       <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
@@ -222,6 +234,14 @@ export const Header: React.FC = () => {
           >
             <span>Top Companies</span>
             <Building2 className="w-4 h-4 text-slate-400" />
+          </Link>
+          <Link
+            to="/job-alerts"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            <span>Job Alerts</span>
+            <Bell className="w-4 h-4 text-slate-400" />
           </Link>
           <Link
             to="/dashboard"

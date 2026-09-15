@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { Company, Job, UserProfile } from '../types';
+import { Company, Job, UserProfile, JobAlert } from '../types';
 
 interface AuthUser {
   id: string;
@@ -31,6 +31,8 @@ interface JobContextType {
   signInWithGoogle: () => Promise<{ error?: string }>;
   resetPassword: (email: string) => Promise<{ error?: string }>;
   logout: () => void;
+  jobAlert: JobAlert | null;
+  saveJobAlert: (alert: JobAlert) => Promise<{ error?: string }>;
 }
 
 const emptyProfile: UserProfile = {
@@ -93,6 +95,14 @@ function mapProfileRow(row: any): UserProfile {
   };
 }
 
+function mapJobAlertRow(row: any): JobAlert {
+  return {
+    role: row.role,
+    skills: row.skills || [],
+    experienceLevel: row.experience_level,
+  };
+}
+
 const JobContext = createContext<JobContextType | undefined>(undefined);
 
 export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -106,6 +116,7 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [userProfile, setUserProfile] = useState<UserProfile>(emptyProfile);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [jobAlert, setJobAlert] = useState<JobAlert | null>(null);
 
   // Load public job/company data on mount (and whenever retryLoad() is called)
   useEffect(() => {
@@ -172,13 +183,15 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Load the user's saved jobs + profile whenever their session changes
   const loadUserData = useCallback(async (userId: string) => {
-    const [{ data: savedRows }, { data: profileRow }] = await Promise.all([
+    const [{ data: savedRows }, { data: profileRow }, { data: alertRow }] = await Promise.all([
       supabase.from('saved_jobs').select('job_id').eq('user_id', userId),
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      supabase.from('job_alerts').select('*').eq('user_id', userId).maybeSingle(),
     ]);
 
     setSavedJobIds((savedRows || []).map((r: any) => r.job_id));
     if (profileRow) setUserProfile(mapProfileRow(profileRow));
+    setJobAlert(alertRow ? mapJobAlertRow(alertRow) : null);
   }, []);
 
   // Auth session bootstrap + listener
@@ -208,6 +221,7 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(null);
       setSavedJobIds([]);
       setUserProfile(emptyProfile);
+      setJobAlert(null);
     }
   }, [session, loadUserData]);
 
@@ -308,6 +322,28 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     supabase.auth.signOut();
   };
 
+  const saveJobAlert = async (alert: JobAlert) => {
+    if (!currentUser) return { error: 'You must be logged in to save a job alert.' };
+
+    const previous = jobAlert;
+    setJobAlert(alert);
+
+    const { error } = await supabase.from('job_alerts').upsert({
+      user_id: currentUser.id,
+      role: alert.role,
+      skills: alert.skills,
+      experience_level: alert.experienceLevel,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      console.error('Failed to save job alert:', error.message);
+      setJobAlert(previous);
+      return { error: error.message };
+    }
+    return {};
+  };
+
   return (
     <JobContext.Provider
       value={{
@@ -331,6 +367,8 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         signInWithGoogle,
         resetPassword,
         logout,
+        jobAlert,
+        saveJobAlert,
       }}
     >
       {children}

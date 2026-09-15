@@ -14,6 +14,7 @@ import { CompaniesPage } from './pages/CompaniesPage';
 import { CompanyDetailPage } from './pages/CompanyDetailPage';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { JobAlertsPage } from './pages/JobAlertsPage';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
                 <Route path="/companies/:id" element={<CompanyDetailPage />} />
                 <Route path="/login" element={<AuthPage initialMode="login" />} />
                 <Route path="/signup" element={<AuthPage initialMode="signup" />} />
+                <Route path="/job-alerts" element={<JobAlertsPage />} />
                 <Route
                   path="/dashboard"
                   element={

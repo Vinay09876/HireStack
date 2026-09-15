@@ -1,0 +1,30 @@
+name: Send job alert digests
+
+on:
+  schedule:
+    # Runs once daily at 04:00 UTC (~09:30 AM IST), after the morning scrape
+    - cron: '0 4 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  send-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install scraper dependencies
+        working-directory: scripts/scraper
+        run: npm ci
+
+      - name: Send job alert digests
+        working-directory: scripts/scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+        run: node send-alerts.mjs
