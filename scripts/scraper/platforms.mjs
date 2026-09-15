@@ -424,10 +424,36 @@ export async function fetchZohoRecruit(company) {
   }));
 }
 
-// The Phenom/Job2Web job detail page is plain server-rendered HTML with the
-// full description marked up as schema.org microdata
-// (<span itemprop="description">...</span>) - the list/search API has no
-// description field at all, so this is the only way to get real content.
+// The Phenom/Job2Web job detail page is plain server-rendered HTML - the
+// list/search API has no description field at all, so this is the only way
+// to get real content. The page layout is not consistent across companies:
+//  - Some (e.g. Wipro) render the real job body under a "Job Description:"
+//    label, in a plain <span class="rtltextaligneligible"> with NO itemprop
+//    attribute; their itemprop="description" spans instead hold generic
+//    company-boilerplate text, not the actual job content.
+//  - Others (e.g. HCLTech) have no such label and put the real content
+//    directly in the (only) itemprop="description" span.
+// So: prefer the label-anchored span when the label exists, and only fall
+// back to itemprop="description" when it doesn't.
+function extractPhenomDescription(html) {
+  const labelIdx = html.indexOf('>Job Description:');
+  if (labelIdx !== -1) {
+    const afterLabel = html.slice(labelIdx);
+    const spanMatch = afterLabel.match(/<span[^>]*class="rtltextaligneligible"[^>]*>/);
+    if (spanMatch) {
+      const contentStart = labelIdx + spanMatch.index + spanMatch[0].length;
+      // The next "joblayouttoken displayDTM" block marks the start of the
+      // next labeled field, so it's a reliable end boundary regardless of
+      // how many nested <div>s the description itself contains.
+      const nextTokenIdx = html.indexOf('<div class="joblayouttoken displayDTM', contentStart);
+      const end = nextTokenIdx === -1 ? contentStart + 20000 : nextTokenIdx;
+      return html.slice(contentStart, end);
+    }
+  }
+  const matches = [...html.matchAll(/itemprop="description"[^>]*>([\s\S]*?)<\/span>/g)];
+  return matches.length > 0 ? matches[matches.length - 1][1] : null;
+}
+
 async function fetchPhenomJobDetail(applicationUrl) {
   const res = await fetch(applicationUrl, {
     headers: { 'User-Agent': USER_AGENT },
@@ -438,9 +464,9 @@ async function fetchPhenomJobDetail(applicationUrl) {
   // as a failure - otherwise it silently persists as an empty description.
   if (!res.ok) throw new Error(`${applicationUrl} -> HTTP ${res.status}`);
   const html = await res.text();
-  const match = html.match(/itemprop="description"[^>]*>([\s\S]*?)<\/span>/);
-  if (!match) throw new Error(`${applicationUrl} -> no description found (likely redirected to an error page)`);
-  return stripHtml(match[1]);
+  const raw = extractPhenomDescription(html);
+  if (!raw) throw new Error(`${applicationUrl} -> no description found (likely redirected to an error page)`);
+  return stripHtml(raw);
 }
 
 export async function fetchPhenomJobStream(company) {
