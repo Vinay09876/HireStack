@@ -411,6 +411,24 @@ export async function fetchAmazonCustom() {
   }));
 }
 
+// Eightfold's list endpoint always returns an empty job_description (at
+// least on Netflix's instance) - only the per-job detail endpoint has real
+// content, with clean <h2> section headings ("Key Responsibilities",
+// "Requirements - Must Have", "Requirements - Preferred") that
+// splitIntoSections/classification already handle.
+async function fetchEightfoldJobDetail(company, jobId) {
+  const url = `https://${company.eightfoldHost}/api/apply/v2/jobs/${jobId}?domain=${company.eightfoldDomain}`;
+  const data = await fetchJson(url);
+  const raw = data.job_description;
+  if (!raw) throw new Error(`no job_description for job ${jobId}`);
+  const sections = splitIntoSections(raw);
+  const classified = classifyPhenomSections(sections);
+  if (!classified.description && classified.responsibilities.length === 0) {
+    classified.description = stripHtml(raw);
+  }
+  return classified;
+}
+
 export async function fetchEightfold(company) {
   const jobs = [];
   let start = 0;
@@ -425,7 +443,8 @@ export async function fetchEightfold(company) {
     // Eightfold rate-limits rapid pagination; back off more generously here.
     await sleep(800);
   }
-  return jobs.map((job) => ({
+
+  const results = jobs.map((job) => ({
     externalId: String(job.id),
     title: job.name,
     location: (job.location || job.locations?.[0] || '').replace(/,/g, ', ').replace(/\s+/g, ' ').trim(),
@@ -434,6 +453,29 @@ export async function fetchEightfold(company) {
     applicationUrl: job.canonicalPositionUrl,
     isRemote: (job.work_location_option || '').toLowerCase() === 'remote',
   }));
+
+  // Detail-fetch only India-looking postings to keep request volume down.
+  const indiaResults = results.filter((j) => WORKDAY_INDIA_HINTS.some((hint) => (j.location || '').toLowerCase().includes(hint)));
+  const DETAIL_CONCURRENCY = 5;
+  for (let i = 0; i < indiaResults.length; i += DETAIL_CONCURRENCY) {
+    const batch = indiaResults.slice(i, i + DETAIL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (job) => {
+        try {
+          const detail = await fetchEightfoldJobDetail(company, job.externalId);
+          job.description = detail.description;
+          job.responsibilities = detail.responsibilities;
+          job.requirements = detail.requirements;
+          job.qualifications = detail.qualifications;
+        } catch (err) {
+          console.warn(`  Eightfold detail fetch failed for ${company.name} ${job.externalId}: ${err.message}`);
+        }
+      })
+    );
+    if (i + DETAIL_CONCURRENCY < indiaResults.length) await sleep(800);
+  }
+
+  return results;
 }
 
 // UrbanCompany's list API already returns the full job_description as HTML,
@@ -829,12 +871,15 @@ function classifyPhenomSections(sections) {
 
     if (isNumberedSection || /responsibilit/.test(h)) {
       responsibilities.push(...extractTopLevelListItems(content));
+    } else if (/preferred|good to have|nice to have|desirable|^qualification/.test(h)) {
+      // Checked before the generic "requirement" match below so a heading
+      // like "Requirements - Preferred" (which contains both words) lands
+      // in qualifications, not requirements.
+      qualifications.push(...extractTopLevelListItems(content));
     } else if (
       /required skill|mandatory|^requirement|ideal candidate|candidate profile/.test(h)
     ) {
       requirements.push(...extractTopLevelListItems(content));
-    } else if (/preferred|good to have|nice to have|desirable|^qualification/.test(h)) {
-      qualifications.push(...extractTopLevelListItems(content));
     } else if (/^job description$/.test(h)) {
       // Wipro wraps everything in an outer "Job Description" <H2> that's
       // purely structural (immediately followed by the title repeated as
