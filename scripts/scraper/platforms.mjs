@@ -582,6 +582,8 @@ export async function fetchTurboHire(company) {
     } catch {
       // leave location empty if the field is malformed
     }
+    // JobDescV2 is already the full description (HTML, no section headings
+    // in practice - just one prose blob) right in the list response.
     return {
       externalId: job.JobId,
       title: job.JobTitle,
@@ -589,6 +591,7 @@ export async function fetchTurboHire(company) {
       department: job.Department || null,
       postedDate: job.PublishedDate ? job.PublishedDate.slice(0, 10) : null,
       applicationUrl: `${company.turboHireReferer}job/${job.JobIdObfuscated}`,
+      description: stripHtml(job.JobDescV2) || undefined,
       isRemote: /remote/i.test(location),
     };
   });
