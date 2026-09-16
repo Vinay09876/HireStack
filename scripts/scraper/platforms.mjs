@@ -436,6 +436,45 @@ export async function fetchEightfold(company) {
   }));
 }
 
+// UrbanCompany's list API already returns the full job_description as HTML,
+// consistently split into bold-labeled sections ("What You'll Do:", "What
+// We Need:", "What can you expect:") followed by real <ul><li> lists - the
+// same shape already handled for Wipro/Capgemini, so splitIntoSections
+// applies directly. "What can you expect" is perks/culture copy, not job
+// content, so it's intentionally skipped rather than kept as prose.
+function classifyUrbanCompanyDescription(html) {
+  if (!html) return { description: '', responsibilities: [], requirements: [] };
+  const sections = splitIntoSections(html);
+  const responsibilities = [];
+  const requirements = [];
+  const introParts = [];
+
+  for (const { heading, content } of sections) {
+    if (heading === null) {
+      const text = stripHtml(content);
+      if (text) introParts.push(text);
+      continue;
+    }
+    const h = heading.toLowerCase();
+    if (/what you.?ll do|responsibilit/.test(h)) {
+      responsibilities.push(...extractTopLevelListItems(content));
+    } else if (/what we need|requirement|qualification/.test(h)) {
+      requirements.push(...extractTopLevelListItems(content));
+    }
+    // "What can you expect" (perks/culture) and anything else is skipped -
+    // it's marketing copy, not job content.
+  }
+
+  let description = introParts.join('\n\n');
+  if (!description) {
+    description =
+      responsibilities.length > 0 || requirements.length > 0
+        ? 'See the sections below for full role details.'
+        : stripHtml(html);
+  }
+  return { description, responsibilities, requirements };
+}
+
 export async function fetchUrbanCompanyCustom() {
   const data = await fetchJson('https://www.urbanclap.com/api/v2/platform-gateway/getAllJobs', {
     method: 'POST',
@@ -443,15 +482,21 @@ export async function fetchUrbanCompanyCustom() {
     body: JSON.stringify({}),
   });
   const jobs = data.jobs || data.data || [];
-  return jobs.map((job) => ({
-    externalId: String(job.id || job.job_id),
-    title: job.job_title || job.title,
-    location: (job.location_city || job.location || []).join(', '),
-    department: job.parent_department || null,
-    postedDate: null,
-    applicationUrl: 'https://careers.urbancompany.com',
-    isRemote: false,
-  }));
+  return jobs.map((job) => {
+    const { description, responsibilities, requirements } = classifyUrbanCompanyDescription(job.job_description);
+    return {
+      externalId: String(job.id || job.job_id),
+      title: job.job_title || job.title,
+      location: (job.location_city || job.location || []).join(', '),
+      department: job.parent_department || null,
+      postedDate: null,
+      applicationUrl: job.apply_url || 'https://careers.urbancompany.com',
+      description: description || undefined,
+      responsibilities,
+      requirements,
+      isRemote: false,
+    };
+  });
 }
 
 export async function fetchTurboHire(company) {
