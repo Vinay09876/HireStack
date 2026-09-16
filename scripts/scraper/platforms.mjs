@@ -1024,7 +1024,11 @@ export async function fetchInfosysCustom() {
       location: job.location || 'India',
       department: job.unit || null,
       postedDate: job.createdOn ? job.createdOn.slice(0, 10) : null,
-      applicationUrl: `https://career.infosys.com/joblist/${job.requisitionId}`,
+      // career.infosys.com is a client-rendered SPA with no discoverable
+      // static per-job URL pattern (the previous /joblist/{id} guess 404s
+      // in the real app) - link to the working job-list/search landing
+      // page instead of a URL that's confirmed broken.
+      applicationUrl: 'https://career.infosys.com/joblist',
       description: proseLines.join('\n\n') || bulletLines[0] || undefined,
       responsibilities: bulletLines,
       isRemote: /remote/i.test(job.location || ''),
