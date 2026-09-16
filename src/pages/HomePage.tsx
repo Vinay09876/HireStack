@@ -50,15 +50,15 @@ export const HomePage: React.FC = () => {
           <div className="text-center max-w-3xl mx-auto mb-10">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200/80 dark:border-indigo-800/80 text-indigo-700 dark:text-indigo-300 text-xs font-semibold mb-6">
               <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Direct Tech Career Aggregator</span>
+              <span>All Top Tech Companies, One Place</span>
             </div>
 
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
-              Land Your Next Role at <span className="text-indigo-600 dark:text-indigo-400">Top Tech Giants</span>
+              All Top Tech Company Jobs, <span className="text-indigo-600 dark:text-indigo-400">In One Place</span>
             </h1>
 
             <p className="mt-5 text-base sm:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
-              Explore verified engineering, AI, product, and infrastructure openings from Amazon, Netflix, NVIDIA, Accenture, and other top employers. Apply directly on their official portals.
+              Instead of visiting Amazon, Netflix, Wipro, TCS, and 50+ other company websites one by one, see all their open jobs right here. When you find one you like, click Apply and we send you straight to that company's own official page to apply — simple as that.
             </p>
           </div>
 
@@ -151,6 +151,47 @@ export const HomePage: React.FC = () => {
             >
               Netflix
             </button>
+          </div>
+        </div>
+      </section>
+
+      {/* PLAIN-LANGUAGE "HOW IT WORKS" SECTION - explains the product in simple words */}
+      <section className="py-12 bg-indigo-50/60 dark:bg-indigo-950/20 border-b border-slate-200/70 dark:border-slate-800/80">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
+            <div>
+              <div className="w-11 h-11 rounded-full bg-indigo-600 text-white flex items-center justify-center mx-auto mb-3 font-bold">
+                1
+              </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                We collect jobs from top company websites
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                No more checking 50 different career pages one by one.
+              </p>
+            </div>
+            <div>
+              <div className="w-11 h-11 rounded-full bg-indigo-600 text-white flex items-center justify-center mx-auto mb-3 font-bold">
+                2
+              </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                You search and browse them all here
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                One website, every job, all in one list.
+              </p>
+            </div>
+            <div>
+              <div className="w-11 h-11 rounded-full bg-indigo-600 text-white flex items-center justify-center mx-auto mb-3 font-bold">
+                3
+              </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                Click Apply, we send you to the real company page
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                You always apply directly on the company's own site — never through us.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -261,9 +302,9 @@ export const HomePage: React.FC = () => {
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
               </div>
               <div>
-                <h4 className="font-semibold text-sm">Direct Company Application</h4>
+                <h4 className="font-semibold text-sm">You Apply on the Real Company Site</h4>
                 <p className="text-xs text-indigo-200 mt-1 leading-relaxed">
-                  Every "Apply Now" button links straight to the employer’s authentic ATS/career page.
+                  Clicking "Apply Now" always takes you to that company's own official careers page — never to us.
                 </p>
               </div>
             </div>
@@ -273,9 +314,9 @@ export const HomePage: React.FC = () => {
                 <ShieldCheck className="w-5 h-5 text-indigo-300" />
               </div>
               <div>
-                <h4 className="font-semibold text-sm">No Intermediaries or Spam</h4>
+                <h4 className="font-semibold text-sm">No Spam, No Fake Jobs</h4>
                 <p className="text-xs text-indigo-200 mt-1 leading-relaxed">
-                  Zero third-party recruiter spam or ghost listings. We only index recognized tech companies.
+                  We only show real jobs pulled straight from real company websites. No made-up listings, no recruiter spam.
                 </p>
               </div>
             </div>
@@ -285,9 +326,9 @@ export const HomePage: React.FC = () => {
                 <Building2 className="w-5 h-5 text-amber-300" />
               </div>
               <div>
-                <h4 className="font-semibold text-sm">Real-time Role Bookmarking</h4>
+                <h4 className="font-semibold text-sm">Save Jobs for Later</h4>
                 <p className="text-xs text-indigo-200 mt-1 leading-relaxed">
-                  Save roles locally across sessions and track your targeted application pipeline with ease.
+                  Bookmark roles you like and come back to them anytime from your dashboard.
                 </p>
               </div>
             </div>

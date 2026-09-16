@@ -34,8 +34,38 @@ const SKILL_SUGGESTIONS = [
   'Machine Learning',
 ];
 
+// Job alerts need a verified email-sending domain to actually deliver
+// digests to real users, which isn't set up yet - show a simple "coming
+// soon" notice instead of a half-working feature until that's ready.
+const JOB_ALERTS_UNDER_MAINTENANCE = true;
+
+const JobAlertsMaintenanceNotice: React.FC = () => (
+  <div className="min-h-[70vh] bg-slate-50/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-16 transition-colors flex items-center">
+    <div className="max-w-xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto mb-6 shadow-md">
+        <Bell className="w-7 h-7" />
+      </div>
+      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/80 text-amber-700 dark:text-amber-300 text-xs font-semibold mb-4">
+        <Sparkles className="w-3.5 h-3.5" />
+        <span>Coming Soon</span>
+      </div>
+      <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3">
+        Job Alerts are still being built
+      </h1>
+      <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed max-w-md mx-auto">
+        We're working on this feature right now. Once it's ready, you'll be able to set your role, skills, and
+        experience here and get an email whenever a matching job is posted. Check back soon!
+      </p>
+    </div>
+  </div>
+);
+
 export const JobAlertsPage: React.FC = () => {
   const { currentUser, jobAlert, saveJobAlert } = useJob();
+
+  if (JOB_ALERTS_UNDER_MAINTENANCE) {
+    return <JobAlertsMaintenanceNotice />;
+  }
 
   const [role, setRole] = useState('');
   const [skills, setSkills] = useState<string[]>([]);

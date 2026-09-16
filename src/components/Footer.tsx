@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Briefcase, ExternalLink, ShieldCheck, Heart } from 'lucide-react';
+import { Briefcase, ExternalLink, ShieldCheck } from 'lucide-react';
 import { useJob } from '../context/JobContext';
 
 export const Footer: React.FC = () => {
@@ -21,11 +21,11 @@ export const Footer: React.FC = () => {
               </span>
             </Link>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Curated tech careers aggregated directly from top engineering teams including Amazon, Netflix, NVIDIA, Accenture, and more.
+              All top tech company jobs, in one place. See jobs from Amazon, Netflix, Wipro, TCS, and 50+ more — apply directly on their real career pages.
             </p>
             <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded-lg w-fit border border-emerald-200 dark:border-emerald-900">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>100% Verified Corporate Career Portals</span>
+              <span>Real Jobs, Real Companies</span>
             </div>
           </div>
 
@@ -88,7 +88,7 @@ export const Footer: React.FC = () => {
               Platform Info
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-3">
-              HireStack is a search and discovery aggregator. We do not store applications or charge job seekers. All applications are completed on official employer portals.
+              HireStack just helps you find and browse jobs. We never take applications or charge job seekers — you always apply on the company's own website.
             </p>
             <div className="flex flex-wrap gap-2 text-xs">
               <Link to="/dashboard" className="text-indigo-600 dark:text-indigo-400 hover:underline">
@@ -104,10 +104,10 @@ export const Footer: React.FC = () => {
 
         {/* Bottom copyright */}
         <div className="pt-8 border-t border-slate-100 dark:border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
-          <p>© {new Date().getFullYear()} HireStack. Built for ambitious engineers worldwide.</p>
+          <p>© {new Date().getFullYear()} HireStack. Built by Vinay Ippakayala.</p>
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
-              Direct Application Guarantee <ExternalLink className="w-3 h-3 opacity-60" />
+              You always apply on the real company site <ExternalLink className="w-3 h-3 opacity-60" />
             </span>
           </div>
         </div>
