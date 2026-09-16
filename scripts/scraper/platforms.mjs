@@ -915,15 +915,28 @@ export async function fetchInfosysCustom() {
   const data = await fetchJson(
     'https://intapgateway.infosysapps.com/careersci/search/intapjbsrch/getHotJobsDetails?location=All%20locations&sourceId=1,21'
   );
-  return (data.hotJobsLists || []).map((job) => ({
-    externalId: String(job.postingId),
-    title: job.postingTitle,
-    location: job.location || 'India',
-    department: job.unit || null,
-    postedDate: job.createdOn ? job.createdOn.slice(0, 10) : null,
-    applicationUrl: `https://career.infosys.com/joblist/${job.requisitionId}`,
-    isRemote: /remote/i.test(job.location || ''),
-  }));
+  return (data.hotJobsLists || []).map((job) => {
+    // rolesResponsibilities is the only field with real content in
+    // practice (technicalRequirement/preferredSkills/educationalRequirement
+    // are consistently empty) - it's plain text using "•" bullets, not
+    // HTML, so pull out bullet lines as responsibilities and keep the
+    // non-bulleted lead-in text as the description.
+    const raw = job.rolesResponsibilities || '';
+    const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+    const bulletLines = lines.filter((l) => l.startsWith('•')).map((l) => l.replace(/^•\s*/, ''));
+    const proseLines = lines.filter((l) => !l.startsWith('•'));
+    return {
+      externalId: String(job.postingId),
+      title: job.postingTitle,
+      location: job.location || 'India',
+      department: job.unit || null,
+      postedDate: job.createdOn ? job.createdOn.slice(0, 10) : null,
+      applicationUrl: `https://career.infosys.com/joblist/${job.requisitionId}`,
+      description: proseLines.join('\n\n') || bulletLines[0] || undefined,
+      responsibilities: bulletLines,
+      isRemote: /remote/i.test(job.location || ''),
+    };
+  });
 }
 
 // Capgemini's list API already returns the full job description as HTML
