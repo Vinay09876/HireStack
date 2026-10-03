@@ -118,8 +118,10 @@
   {
     "id": "postman",
     "name": "Postman",
-    "platform": "greenhouse",
+    "platform": "workday",
     "platformId": "postman",
+    "workdayHost": "postman.wd108.myworkdayjobs.com",
+    "workdaySite": "careers",
     "logoUrl": "https://images.unsplash.com/photo-1618172193622-ae2d025f4032?w=128&h=128&fit=crop&crop=faces&q=80",
     "about": "Postman is the world's leading API platform, used by millions of developers and enterprises to build and use APIs.",
     "websiteUrl": "https://www.postman.com/company/careers/",
@@ -529,6 +531,7 @@
     "id": "amplitude",
     "name": "Amplitude",
     "platform": "greenhouse",
+    "knownFailing": true,
     "platformId": "amplitude",
     "logoUrl": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=128&h=128&fit=crop&crop=faces&q=80",
     "about": "Amplitude is a digital analytics platform that helps companies understand user behavior to build better products.",
@@ -563,19 +566,6 @@
     "founded": "2018",
     "employees": "1,000+",
     "bannerGradient": "from-slate-700 via-zinc-800 to-neutral-900"
-  },
-  {
-    "id": "linkedin",
-    "name": "LinkedIn",
-    "platform": "greenhouse",
-    "platformId": "linkedin",
-    "logoUrl": "https://images.unsplash.com/photo-1611944212129-29977ae1398c?w=128&h=128&fit=crop&crop=faces&q=80",
-    "about": "LinkedIn is the world's largest professional network, helping people find jobs, build connections, and grow their careers.",
-    "websiteUrl": "https://careers.linkedin.com",
-    "headquarters": "Bengaluru, Karnataka",
-    "founded": "2003",
-    "employees": "20,000+",
-    "bannerGradient": "from-blue-600 via-sky-600 to-blue-800"
   },
   {
     "id": "salesforce",
