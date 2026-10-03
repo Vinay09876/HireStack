@@ -34,11 +34,14 @@ create table if not exists public.jobs (
   salary_range text,
   application_url text not null,
   source_url text,
-  posted_date date not null default current_date,
+  posted_date date, -- null when the source doesn't provide a posting date
   is_active boolean not null default true,
   department text,
   is_remote boolean not null default false,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- set by the scraper to the run's start time whenever the job is seen;
+  -- active jobs not seen in a successful run for their company are deactivated
+  last_seen_at timestamptz not null default now()
 );
 
 create index if not exists jobs_company_id_idx on public.jobs(company_id);
@@ -173,3 +176,59 @@ create policy "Users can delete their own job alert"
 
 -- job_alert_sent has no public policies: it's only ever written by the
 -- server-side digest script using the service_role key, which bypasses RLS.
+
+-- ============================================================
+-- Read-only views used by the frontend (see migrations/002 for details).
+-- security_invoker = true makes them run with the caller's privileges, so the
+-- jobs/companies RLS policies above apply unchanged. Requires Postgres 15+.
+-- ============================================================
+create or replace view public.job_listings
+with (security_invoker = true) as
+select
+  j.id,
+  j.title,
+  j.company_id,
+  coalesce(c.name, j.company_id) as company_name,
+  coalesce(c.logo_url, '') as company_logo,
+  j.location,
+  j.job_type,
+  j.experience_level,
+  j.description,
+  j.responsibilities,
+  j.requirements,
+  j.qualifications,
+  j.salary_range,
+  j.application_url,
+  j.posted_date,
+  j.department,
+  j.is_remote,
+  j.created_at,
+  lower(concat_ws(
+    E'\n',
+    j.title,
+    coalesce(c.name, j.company_id),
+    j.description,
+    array_to_string(j.requirements, E'\n'),
+    j.department
+  )) as search_text
+from public.jobs j
+left join public.companies c on c.id = j.company_id
+where j.is_active;
+
+create or replace view public.company_job_counts
+with (security_invoker = true) as
+select company_id, count(*)::int as open_roles
+from public.jobs
+where is_active
+group by company_id;
+
+create or replace view public.job_locations
+with (security_invoker = true) as
+select distinct btrim(split_part(location, '(', 1)) as location
+from public.jobs
+where is_active;
+
+revoke all on public.job_listings, public.company_job_counts, public.job_locations
+  from public, anon, authenticated;
+grant select on public.job_listings, public.company_job_counts, public.job_locations
+  to anon, authenticated;

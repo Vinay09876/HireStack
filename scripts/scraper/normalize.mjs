@@ -51,7 +51,9 @@ export function normalizeJob(company, raw) {
     salary_range: null,
     application_url: raw.applicationUrl,
     source_url: raw.applicationUrl,
-    posted_date: raw.postedDate || new Date().toISOString().slice(0, 10),
+    // Unknown stays null - defaulting to today would make every undated job
+    // look freshly posted again on each scrape run.
+    posted_date: raw.postedDate || null,
     is_active: true,
     department: raw.department,
     is_remote: !!raw.isRemote,

@@ -1,9 +1,11 @@
 name: Send job alert digests
 
 on:
-  schedule:
-    # Runs once daily at 04:00 UTC (~09:30 AM IST), after the morning scrape
-    - cron: '0 4 * * *'
+  # Scheduled runs are paused while Job Alerts is disabled in the UI (pending a
+  # verified Resend sending domain). To re-enable when the feature launches:
+  #   schedule:
+  #     # Runs once daily at 04:00 UTC (~09:30 AM IST), after the morning scrape
+  #     - cron: '0 4 * * *'
   workflow_dispatch: {}
 
 jobs:

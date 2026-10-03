@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import dotenv from 'dotenv';
 import { PLATFORM_ADAPTERS } from './platforms.mjs';
-import { isIndiaJob, normalizeJob } from './normalize.mjs';
+import { ScrapeError, fetchCompanyJobs, prepareJobs } from './scrape-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '.env') });
@@ -36,7 +36,7 @@ async function upsertCompany(company) {
     },
     { onConflict: 'id' }
   );
-  if (error) throw new Error(`companies upsert failed for ${company.id}: ${error.message}`);
+  if (error) throw new ScrapeError('db', `companies upsert failed for ${company.id}: ${error.message}`);
 }
 
 async function upsertJobs(jobs) {
@@ -45,87 +45,123 @@ async function upsertJobs(jobs) {
   for (let i = 0; i < jobs.length; i += CHUNK) {
     const chunk = jobs.slice(i, i + CHUNK);
     const { error } = await supabase.from('jobs').upsert(chunk, { onConflict: 'id' });
-    if (error) throw new Error(`jobs upsert failed: ${error.message}`);
+    if (error) throw new ScrapeError('db', `jobs upsert failed: ${error.message}`);
   }
 }
 
-async function deactivateMissingJobs(companyId, activeIds) {
-  if (activeIds.length === 0) {
-    // Nothing came back this run — don't nuke everything on a transient failure;
-    // caller already logs a warning and skips this company's cleanup.
-    return;
-  }
+// Every job upserted this run carries last_seen_at = runStartedAt, so any of
+// this company's still-active jobs with an older last_seen_at weren't returned
+// by the source this time and are no longer open. Only called after the
+// company's fetch AND upsert both succeeded, so a failed or partial run never
+// deactivates anything.
+async function deactivateMissingJobs(companyId, runStartedAt) {
   const { error } = await supabase
     .from('jobs')
     .update({ is_active: false })
     .eq('company_id', companyId)
-    .not('id', 'in', `(${activeIds.map((id) => `"${id}"`).join(',')})`);
-  if (error) throw new Error(`deactivate failed for ${companyId}: ${error.message}`);
+    .eq('is_active', true)
+    .lt('last_seen_at', runStartedAt);
+  if (error) throw new ScrapeError('db', `deactivate failed for ${companyId}: ${error.message}`);
 }
 
-// Hard ceiling on how long a single company's fetch can run for. Individual
-// requests already time out and retry inside fetchJson(), but this is a
-// backstop so a company that keeps paginating (or any other runaway loop)
-// can never stall the whole scheduled run.
-// Workday companies with many India postings now also fetch a per-job
-// detail page for a real description, so this needs real headroom.
-const COMPANY_TIMEOUT_MS = 300000;
-
-function withTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
-  ]);
+// Companies deleted from companies.json are never scraped again, so their
+// jobs would otherwise stay active forever. The company rows themselves are
+// kept: deleting them would cascade-delete users' saved_jobs.
+async function deactivateRemovedCompanies(configuredIds) {
+  if (configuredIds.length === 0) {
+    // An empty filter would match - and deactivate - every job in the table.
+    throw new ScrapeError('config', 'companies.json has no company ids; refusing to deactivate removed companies');
+  }
+  const { data, error } = await supabase
+    .from('jobs')
+    .update({ is_active: false })
+    .eq('is_active', true)
+    .not('company_id', 'in', `(${configuredIds.map((id) => `"${id}"`).join(',')})`)
+    .select('company_id');
+  if (error) throw new ScrapeError('db', `deactivate failed for removed companies: ${error.message}`);
+  return data || [];
 }
 
 async function run() {
+  // One timestamp for the whole run, stamped onto every job seen in it.
+  const runStartedAt = new Date().toISOString();
   const summary = [];
 
   for (const company of companies) {
     const adapter = PLATFORM_ADAPTERS[company.platform];
     if (!adapter) {
-      console.warn(`Skipping ${company.name}: no adapter for platform "${company.platform}"`);
+      const message = `no adapter for platform "${company.platform}"`;
+      summary.push({ company: company.name, status: 'error', kind: 'config', knownFailing: !!company.knownFailing, error: message });
+      console.error(`${company.name}: FAILED (config) - ${message}`);
       continue;
     }
 
     try {
       await upsertCompany(company);
 
-      const rawJobs = await withTimeout(adapter(company), COMPANY_TIMEOUT_MS, company.name);
-      const indiaJobs = rawJobs.filter(isIndiaJob);
-      const normalizedWithDupes = indiaJobs.map((raw) => normalizeJob(company, raw));
-
-      // Some ATS APIs (e.g. Oracle HCM) can return the same job across
-      // overlapping pages; de-dupe by id before upserting so a single
-      // upsert() call never targets the same row twice.
-      const seen = new Set();
-      const normalized = normalizedWithDupes.filter((job) => {
-        if (seen.has(job.id)) return false;
-        seen.add(job.id);
-        return true;
-      });
+      const rawJobs = await fetchCompanyJobs(adapter, company);
+      const { jobs: normalized } = prepareJobs(company, rawJobs, runStartedAt);
 
       await upsertJobs(normalized);
-      await deactivateMissingJobs(
-        company.id,
-        normalized.map((j) => j.id)
-      );
+
+      if (normalized.length === 0) {
+        // Zero India jobs is far more often a transient/upstream glitch than
+        // a company genuinely closing every role, so don't wipe its listings.
+        console.warn(`${company.name}: 0 India-based jobs returned; skipping deactivation of its existing jobs`);
+      } else {
+        await deactivateMissingJobs(company.id, runStartedAt);
+      }
 
       summary.push({ company: company.name, total: rawJobs.length, india: normalized.length, status: 'ok' });
       console.log(`${company.name}: ${rawJobs.length} total, ${normalized.length} India-based`);
     } catch (err) {
-      summary.push({ company: company.name, status: 'error', error: err.message });
-      console.error(`${company.name}: FAILED - ${err.message}`);
+      const kind = err instanceof ScrapeError ? err.kind : 'db';
+      summary.push({ company: company.name, status: 'error', kind, knownFailing: !!company.knownFailing, error: err.message });
+      console.error(`${company.name}: FAILED (${kind}) - ${err.message}`);
     }
+  }
+
+  try {
+    const removed = await deactivateRemovedCompanies(companies.map((c) => c.id));
+    const removedCompanyIds = [...new Set(removed.map((row) => row.company_id))];
+    if (removed.length > 0) {
+      console.log(
+        `Deactivated ${removed.length} job(s) from companies no longer in companies.json: ${removedCompanyIds.join(', ')}`
+      );
+    }
+  } catch (err) {
+    const kind = err instanceof ScrapeError ? err.kind : 'db';
+    summary.push({ company: '(removed companies cleanup)', status: 'error', kind, knownFailing: false, error: err.message });
+    console.error(`Removed-companies cleanup: FAILED (${kind}) - ${err.message}`);
   }
 
   console.log('\n=== Scrape summary ===');
   console.table(summary);
 
   const failures = summary.filter((s) => s.status === 'error');
-  if (failures.length > 0) {
-    console.error(`\n${failures.length} of ${summary.length} companies failed this run.`);
+  const excused = failures.filter((s) => s.kind === 'fetch' && s.knownFailing);
+  const blocking = failures.filter((s) => !excused.includes(s));
+
+  if (excused.length > 0) {
+    console.warn(
+      `\n${excused.length} known-failing compan${excused.length === 1 ? 'y' : 'ies'} failed to fetch (not failing the run): ` +
+        excused.map((s) => s.company).join(', ')
+    );
   }
+  if (blocking.length > 0) {
+    console.error(`\n${blocking.length} failure(s) this run:`);
+    for (const s of blocking) console.error(`  - ${s.company} [${s.kind}]: ${s.error}`);
+  }
+  return blocking.length === 0;
 }
 
-run();
+run()
+  .then((ok) => {
+    // Explicit exit: a timed-out adapter's requests may still be in flight and
+    // would otherwise keep the process alive after the run has finished.
+    process.exit(ok ? 0 : 1);
+  })
+  .catch((err) => {
+    console.error('Fatal error in scraper:', err);
+    process.exit(1);
+  });

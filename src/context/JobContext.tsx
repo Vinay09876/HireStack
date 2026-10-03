@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { Company, Job, UserProfile, JobAlert } from '../types';
+import { fetchCompanyJobCounts } from '../lib/jobsApi';
+import { Company, UserProfile, JobAlert } from '../types';
 
 interface AuthUser {
   id: string;
@@ -11,18 +12,18 @@ interface AuthUser {
 }
 
 interface JobContextType {
-  jobs: Job[];
   companies: Company[];
+  // Active-job count per company id, and their sum. Jobs themselves are
+  // queried per page via src/lib/jobsApi.ts.
+  totalActiveJobs: number;
+  getOpenRoleCount: (companyId: string) => number;
   loading: boolean;
   loadError: string | null;
   retryLoad: () => void;
   savedJobIds: string[];
   toggleSaveJob: (id: string) => void;
   isJobSaved: (id: string) => boolean;
-  getSavedJobs: () => Job[];
-  getJobById: (id: string) => Job | undefined;
   getCompanyById: (id: string) => Company | undefined;
-  getJobsByCompany: (companyId: string) => Job[];
   userProfile: UserProfile;
   updateUserProfile: (profile: Partial<UserProfile>) => void;
   currentUser: AuthUser | null;
@@ -59,30 +60,6 @@ function mapCompanyRow(row: any): Company {
   };
 }
 
-function mapJobRow(row: any, companyById: Map<string, Company>): Job {
-  const company = companyById.get(row.company_id);
-  return {
-    id: row.id,
-    title: row.title,
-    companyId: row.company_id,
-    companyName: company?.name || row.company_id,
-    companyLogo: company?.logoUrl || '',
-    location: row.location,
-    jobType: row.job_type,
-    experienceLevel: row.experience_level,
-    description: row.description,
-    responsibilities: row.responsibilities || [],
-    requirements: row.requirements || [],
-    qualifications: row.qualifications || [],
-    salaryRange: row.salary_range,
-    applicationUrl: row.application_url,
-    postedDate: row.posted_date,
-    isActive: row.is_active,
-    department: row.department,
-    isRemote: row.is_remote,
-  };
-}
-
 function mapProfileRow(row: any): UserProfile {
   return {
     name: row.name || '',
@@ -106,8 +83,8 @@ function mapJobAlertRow(row: any): JobAlert {
 const JobContext = createContext<JobContextType | undefined>(undefined);
 
 export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [jobs, setJobs] = useState<Job[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyJobCounts, setCompanyJobCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -118,7 +95,9 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [session, setSession] = useState<Session | null>(null);
   const [jobAlert, setJobAlert] = useState<JobAlert | null>(null);
 
-  // Load public job/company data on mount (and whenever retryLoad() is called)
+  // Load companies + their open-role counts on mount (and whenever retryLoad()
+  // is called). Both are small (one row per company); job rows themselves are
+  // never loaded wholesale.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -136,36 +115,22 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     (async () => {
       try {
-        const { data: companyRows, error: companyError } = await supabase.from('companies').select('*');
+        const [{ data: companyRows, error: companyError }, counts] = await Promise.all([
+          // Insertion order (the order companies were first scraped), made
+          // deterministic with id as tie-breaker.
+          supabase.from('companies').select('*').order('created_at').order('id'),
+          fetchCompanyJobCounts(),
+        ]);
         if (companyError) throw new Error(companyError.message);
-
-        // Supabase caps a single select() at 1000 rows, so page through
-        // all active jobs rather than silently truncating the result.
-        const PAGE_SIZE = 1000;
-        const jobRows: any[] = [];
-        for (let from = 0; ; from += PAGE_SIZE) {
-          const { data, error } = await supabase
-            .from('jobs')
-            .select('*')
-            .eq('is_active', true)
-            .range(from, from + PAGE_SIZE - 1);
-          if (error) throw new Error(error.message);
-          jobRows.push(...(data || []));
-          if (!data || data.length < PAGE_SIZE) break;
-        }
 
         if (cancelled) return;
 
-        const mappedCompanies = (companyRows || []).map(mapCompanyRow);
-        const companyById = new Map(mappedCompanies.map((c) => [c.id, c]));
-        const mappedJobs = jobRows.map((row) => mapJobRow(row, companyById));
-
-        setCompanies(mappedCompanies);
-        setJobs(mappedJobs);
+        setCompanies((companyRows || []).map(mapCompanyRow));
+        setCompanyJobCounts(counts);
         setLoading(false);
       } catch (err) {
         if (cancelled) return;
-        console.error('Failed to load jobs/companies:', err);
+        console.error('Failed to load companies:', err);
         setLoadError(err instanceof Error ? err.message : 'Failed to load jobs.');
         setLoading(false);
       } finally {
@@ -184,7 +149,13 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Load the user's saved jobs + profile whenever their session changes
   const loadUserData = useCallback(async (userId: string) => {
     const [{ data: savedRows }, { data: profileRow }, { data: alertRow }] = await Promise.all([
-      supabase.from('saved_jobs').select('job_id').eq('user_id', userId),
+      // Most recently saved first (deterministic Dashboard order).
+      supabase
+        .from('saved_jobs')
+        .select('job_id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .order('job_id'),
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('job_alerts').select('*').eq('user_id', userId).maybeSingle(),
     ]);
@@ -255,14 +226,14 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const isJobSaved = (id: string) => savedJobIds.includes(id);
 
-  const getSavedJobs = () => jobs.filter((j) => savedJobIds.includes(j.id));
-
-  const getJobById = (id: string) => jobs.find((j) => j.id === id);
-
   const getCompanyById = (id: string) => companies.find((c) => c.id === id);
 
-  const getJobsByCompany = (companyId: string) =>
-    jobs.filter((j) => j.companyId.toLowerCase() === companyId.toLowerCase());
+  const getOpenRoleCount = (companyId: string) => companyJobCounts[companyId] ?? 0;
+
+  const totalActiveJobs = useMemo(
+    () => Object.values<number>(companyJobCounts).reduce((sum: number, n: number) => sum + n, 0),
+    [companyJobCounts]
+  );
 
   const updateUserProfile = async (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
@@ -347,18 +318,16 @@ export const JobProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <JobContext.Provider
       value={{
-        jobs,
         companies,
+        totalActiveJobs,
+        getOpenRoleCount,
         loading,
         loadError,
         retryLoad,
         savedJobIds,
         toggleSaveJob,
         isJobSaved,
-        getSavedJobs,
-        getJobById,
         getCompanyById,
-        getJobsByCompany,
         userProfile,
         updateUserProfile,
         currentUser,

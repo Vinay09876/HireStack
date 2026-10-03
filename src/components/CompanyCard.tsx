@@ -11,8 +11,8 @@ interface CompanyCardProps {
 
 export const CompanyCard: React.FC<CompanyCardProps> = ({ company }) => {
   const navigate = useNavigate();
-  const { getJobsByCompany } = useJob();
-  const openRoles = getJobsByCompany(company.id);
+  const { getOpenRoleCount } = useJob();
+  const openRoleCount = getOpenRoleCount(company.id);
 
   const handleClick = () => {
     navigate(`/companies/${company.id}`);
@@ -40,7 +40,7 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({ company }) => {
 
           <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800/80">
             <Briefcase className="w-3 h-3" />
-            {openRoles.length} {openRoles.length === 1 ? 'role' : 'roles'}
+            {openRoleCount} {openRoleCount === 1 ? 'role' : 'roles'}
           </span>
         </div>
 

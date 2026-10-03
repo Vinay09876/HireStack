@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Building2,
@@ -14,14 +14,54 @@ import {
 import { useJob } from '../context/JobContext';
 import { CompanyLogo } from '../components/CompanyLogo';
 import { JobCard } from '../components/JobCard';
+import { fetchJobsByCompany } from '../lib/jobsApi';
+import { Job } from '../types';
 
 export const CompanyDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getCompanyById, getJobsByCompany, companies, loading, loadError, retryLoad } = useJob();
+  const {
+    getCompanyById,
+    companies,
+    loading: companiesLoading,
+    loadError: companiesError,
+    retryLoad: retryCompanies,
+  } = useJob();
 
   const company = getCompanyById(id || '');
-  const openJobs = getJobsByCompany(id || '');
+
+  // This company's active jobs, newest first.
+  const [openJobs, setOpenJobs] = useState<Job[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [jobsReloadToken, setJobsReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setJobsLoading(true);
+    setJobsError(null);
+    setOpenJobs([]);
+    fetchJobsByCompany(id || '')
+      .then((result) => {
+        if (!cancelled) setOpenJobs(result.jobs);
+      })
+      .catch((err) => {
+        if (!cancelled) setJobsError(err instanceof Error ? err.message : 'Failed to load jobs.');
+      })
+      .finally(() => {
+        if (!cancelled) setJobsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, jobsReloadToken]);
+
+  const loading = companiesLoading || jobsLoading;
+  const loadError = companiesError || jobsError;
+  const retryLoad = () => {
+    if (companiesError) retryCompanies();
+    if (jobsError) setJobsReloadToken((t) => t + 1);
+  };
 
   useEffect(() => {
     window.scrollTo(0, 0);

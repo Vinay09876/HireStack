@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   MapPin,
@@ -20,13 +20,72 @@ import { ApplyButton } from '../components/ApplyButton';
 import { BookmarkButton } from '../components/BookmarkButton';
 import { JobCard } from '../components/JobCard';
 import { formatPostedDate } from '../utils/date';
+import { fetchJobById, fetchJobsByCompany, fetchSimilarJobs } from '../lib/jobsApi';
+import { Job } from '../types';
+
+// Max other roles listed in the sidebar (the total is still shown).
+const OTHER_ROLES_LIMIT = 50;
 
 export const JobDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getJobById, getCompanyById, getJobsByCompany, jobs, loading, loadError, retryLoad } = useJob();
+  const { getCompanyById } = useJob();
 
-  const job = getJobById(id || '');
+  const [job, setJob] = useState<Job | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const retryLoad = () => setReloadToken((t) => t + 1);
+
+  // Other open roles at this company (excluding current job), plus their total
+  const [otherCompanyRoles, setOtherCompanyRoles] = useState<Job[]>([]);
+  const [otherCompanyRolesTotal, setOtherCompanyRolesTotal] = useState(0);
+  // Similar jobs: same experience level or job type
+  const [similarJobs, setSimilarJobs] = useState<Job[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    setJob(null);
+    setOtherCompanyRoles([]);
+    setOtherCompanyRolesTotal(0);
+    setSimilarJobs([]);
+
+    (async () => {
+      try {
+        const found = await fetchJobById(id || '');
+        if (cancelled) return;
+        setJob(found);
+        setLoading(false);
+        if (!found) return;
+
+        // Secondary sections: a failure here shouldn't hide the job itself.
+        const [others, similar] = await Promise.all([
+          fetchJobsByCompany(found.companyId, { excludeId: found.id, limit: OTHER_ROLES_LIMIT }).catch((err) => {
+            console.error(err);
+            return { jobs: [], total: 0 };
+          }),
+          fetchSimilarJobs(found, 3).catch((err) => {
+            console.error(err);
+            return [];
+          }),
+        ]);
+        if (cancelled) return;
+        setOtherCompanyRoles(others.jobs);
+        setOtherCompanyRolesTotal(others.total);
+        setSimilarJobs(similar);
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : 'Failed to load job.');
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, reloadToken]);
 
   // Scroll to top on id change
   useEffect(() => {
@@ -77,14 +136,6 @@ export const JobDetailPage: React.FC = () => {
   }
 
   const company = getCompanyById(job.companyId);
-
-  // Other open roles at this company (excluding current job)
-  const otherCompanyRoles = getJobsByCompany(job.companyId).filter((j) => j.id !== job.id);
-
-  // Similar jobs: same category or experience level or other top tech companies
-  const similarJobs = jobs
-    .filter((j) => j.id !== job.id && (j.experienceLevel === job.experienceLevel || j.jobType === job.jobType))
-    .slice(0, 3);
 
   const handleShare = () => {
     if (navigator.clipboard) {
@@ -324,11 +375,11 @@ export const JobDetailPage: React.FC = () => {
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-xs">
                 <h3 className="font-bold text-sm text-slate-900 dark:text-white mb-3 flex items-center justify-between">
                   <span>Other roles at {job.companyName}</span>
-                  <span className="text-xs font-normal text-slate-400">({otherCompanyRoles.length})</span>
+                  <span className="text-xs font-normal text-slate-400">({otherCompanyRolesTotal})</span>
                 </h3>
 
                 <div className="space-y-3 max-h-96 overflow-y-auto pr-1 -mr-1">
-                  {otherCompanyRoles.slice(0, 50).map((role) => (
+                  {otherCompanyRoles.map((role) => (
                     <Link
                       key={role.id}
                       to={`/jobs/${role.id}`}
@@ -345,12 +396,12 @@ export const JobDetailPage: React.FC = () => {
                     </Link>
                   ))}
                 </div>
-                {otherCompanyRoles.length > 50 && (
+                {otherCompanyRolesTotal > OTHER_ROLES_LIMIT && (
                   <Link
                     to={`/companies/${job.companyId}`}
                     className="mt-3 flex items-center justify-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
                   >
-                    <span>View all {otherCompanyRoles.length} roles</span>
+                    <span>View all {otherCompanyRolesTotal} roles</span>
                     <ArrowUpRight className="w-3.5 h-3.5" />
                   </Link>
                 )}

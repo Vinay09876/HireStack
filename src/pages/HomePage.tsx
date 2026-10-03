@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Search,
@@ -14,10 +14,51 @@ import {
 import { useJob } from '../context/JobContext';
 import { JobCard } from '../components/JobCard';
 import { CompanyLogo } from '../components/CompanyLogo';
+import { fetchFeaturedJobs } from '../lib/jobsApi';
+import { Job } from '../types';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { jobs, companies, loading, loadError, retryLoad } = useJob();
+  const {
+    companies,
+    totalActiveJobs,
+    getOpenRoleCount,
+    loading: companiesLoading,
+    loadError: companiesError,
+    retryLoad: retryCompanies,
+  } = useJob();
+
+  // 6 featured jobs: the most recently posted (deterministic).
+  const [featuredJobs, setFeaturedJobs] = useState<Job[]>([]);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
+  const [featuredError, setFeaturedError] = useState<string | null>(null);
+  const [featuredReloadToken, setFeaturedReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFeaturedLoading(true);
+    setFeaturedError(null);
+    fetchFeaturedJobs(6)
+      .then((result) => {
+        if (!cancelled) setFeaturedJobs(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setFeaturedError(err instanceof Error ? err.message : 'Failed to load jobs.');
+      })
+      .finally(() => {
+        if (!cancelled) setFeaturedLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [featuredReloadToken]);
+
+  const loading = companiesLoading || featuredLoading;
+  const loadError = companiesError || featuredError;
+  const retryLoad = () => {
+    if (companiesError) retryCompanies();
+    if (featuredError) setFeaturedReloadToken((t) => t + 1);
+  };
 
   const [keyword, setKeyword] = useState('');
   const [location, setLocation] = useState('');
@@ -35,9 +76,6 @@ export const HomePage: React.FC = () => {
     params.set(paramKey, paramValue);
     navigate(`/jobs?${params.toString()}`);
   };
-
-  // 6 featured jobs across diverse companies and disciplines
-  const featuredJobs = jobs.slice(0, 6);
 
   return (
     <div className="min-h-screen bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
@@ -235,7 +273,7 @@ export const HomePage: React.FC = () => {
                   {company.name}
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  {jobs.filter((j) => j.companyId === company.id).length} open roles
+                  {getOpenRoleCount(company.id)} open roles
                 </span>
               </Link>
             ))}
@@ -263,7 +301,7 @@ export const HomePage: React.FC = () => {
             to="/jobs"
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 shadow-xs transition-all"
           >
-            <span>Explore all {jobs.length} roles</span>
+            <span>Explore all {totalActiveJobs} roles</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>

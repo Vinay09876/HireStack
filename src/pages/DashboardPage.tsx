@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   Bookmark,
@@ -15,11 +15,40 @@ import {
 } from 'lucide-react';
 import { useJob } from '../context/JobContext';
 import { JobCard } from '../components/JobCard';
-import { UserProfile } from '../types';
+import { Job, UserProfile } from '../types';
+import { fetchJobsByIds } from '../lib/jobsApi';
 
 export const DashboardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { getSavedJobs, savedJobIds, userProfile, updateUserProfile, currentUser } = useJob();
+  const { savedJobIds, userProfile, updateUserProfile, currentUser } = useJob();
+
+  // Saved jobs are fetched by id; only ids not fetched yet trigger a request,
+  // so un-saving a job (which only removes an id) needs no network round trip.
+  const [savedJobsById, setSavedJobsById] = useState<Map<string, Job>>(new Map());
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const missing = savedJobIds.filter((jobId) => !requestedIds.has(jobId));
+    if (missing.length === 0) return;
+    setRequestedIds((prev) => new Set([...prev, ...missing]));
+    fetchJobsByIds(missing)
+      .then((fetched) => {
+        setSavedJobsById((prev) => {
+          const next = new Map(prev);
+          for (const job of fetched) next.set(job.id, job);
+          return next;
+        });
+      })
+      // Not retried automatically (that would loop on a persistent error);
+      // reloading the page retries.
+      .catch((err) => console.error(err));
+  }, [savedJobIds, requestedIds]);
+
+  // Only active jobs come back from the database, as before; in saved order.
+  const savedJobsList = useMemo(
+    () => savedJobIds.map((jobId) => savedJobsById.get(jobId)).filter((job): job is Job => job !== undefined),
+    [savedJobIds, savedJobsById]
+  );
 
   const tabParam = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState<'saved' | 'profile'>(
@@ -47,8 +76,6 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     setFormData(userProfile);
   }, [userProfile]);
-
-  const savedJobsList = getSavedJobs();
 
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();

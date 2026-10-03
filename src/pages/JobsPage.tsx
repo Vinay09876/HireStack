@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Search,
@@ -16,14 +16,20 @@ import { useJob } from '../context/JobContext';
 import { ExperienceLevel, FilterState, Job, JobType } from '../types';
 import { JobCard } from '../components/JobCard';
 import { FilterSidebar } from '../components/FilterSidebar';
-import { getDaysAgo } from '../utils/date';
+import { fetchJobLocations, fetchJobsPage, SortOption } from '../lib/jobsApi';
 
 const ITEMS_PER_PAGE = 20;
 
-type SortOption = 'recent' | 'relevance';
+// Wait for a pause in typing before querying the database for a keyword.
+const SEARCH_DEBOUNCE_MS = 300;
 
 export const JobsPage: React.FC = () => {
-  const { jobs, loading, loadError, retryLoad } = useJob();
+  const {
+    companies,
+    getOpenRoleCount,
+    loadError: companiesError,
+    retryLoad: retryCompanies,
+  } = useJob();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Mobile filters drawer open state
@@ -69,94 +75,83 @@ export const JobsPage: React.FC = () => {
     setCurrentPage(1); // Reset to page 1 on filter changes
   }, [filters, setSearchParams]);
 
-  // Extract distinct locations for dropdown
-  const availableLocations = useMemo(() => {
-    const locs = Array.from(new Set(jobs.map((j) => j.location.split('(')[0].trim())));
-    return locs.sort();
-  }, [jobs]);
+  // Distinct locations for the dropdown (from the job_locations view)
+  const [availableLocations, setAvailableLocations] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchJobLocations()
+      .then((locations) => {
+        if (!cancelled) setAvailableLocations(locations);
+      })
+      .catch((err) => console.error(err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Extract distinct companies (that actually have jobs) for dropdown
+  // Distinct companies (that actually have jobs) for dropdown
   const availableCompanies = useMemo(() => {
-    const names = Array.from(new Set(jobs.map((j) => j.companyName)));
+    const names = Array.from(
+      new Set(companies.filter((c) => getOpenRoleCount(c.id) > 0).map((c) => c.name))
+    );
     return names.sort();
-  }, [jobs]);
+  }, [companies, getOpenRoleCount]);
 
-  // Filter logic
-  const filteredJobs = useMemo(() => {
-    return jobs.filter((job) => {
-      // Keyword search (title, company, description, requirements)
-      if (filters.searchQuery.trim()) {
-        const query = filters.searchQuery.toLowerCase().trim();
-        const matchesTitle = job.title.toLowerCase().includes(query);
-        const matchesCompany = job.companyName.toLowerCase().includes(query);
-        const matchesDesc = job.description.toLowerCase().includes(query);
-        const matchesReqs = job.requirements.some((r) => r.toLowerCase().includes(query));
-        const matchesDept = job.department?.toLowerCase().includes(query);
+  // Filtering, sorting and pagination run in the database. The keyword is
+  // debounced so typing doesn't send a query per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState(filters.searchQuery);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(filters.searchQuery), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [filters.searchQuery]);
 
-        if (!matchesTitle && !matchesCompany && !matchesDesc && !matchesReqs && !matchesDept) {
-          return false;
-        }
-      }
+  const queryFilters = useMemo(
+    () => ({ ...filters, searchQuery: debouncedSearch }),
+    [filters, debouncedSearch]
+  );
 
-      // Location match
-      if (filters.location) {
-        const queryLoc = filters.location.toLowerCase();
-        if (!job.location.toLowerCase().includes(queryLoc)) {
-          return false;
-        }
-      }
+  const [paginatedJobs, setPaginatedJobs] = useState<Job[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  // Only the latest request may update the list, so a slow earlier response
+  // can never overwrite a newer one.
+  const latestRequest = useRef(0);
 
-      // Company match
-      if (filters.company) {
-        if (job.companyName.toLowerCase() !== filters.company.toLowerCase()) {
-          return false;
-        }
-      }
-
-      // Job type
-      if (filters.jobTypes.length > 0) {
-        if (!filters.jobTypes.includes(job.jobType)) {
-          return false;
-        }
-      }
-
-      // Experience level
-      if (filters.experienceLevels.length > 0) {
-        if (!filters.experienceLevels.includes(job.experienceLevel)) {
-          return false;
-        }
-      }
-
-      // Posted date
-      if (filters.postedWithinDays !== 'all') {
-        const days = getDaysAgo(job.postedDate);
-        if (days > filters.postedWithinDays) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [jobs, filters]);
-
-  // Sorting logic
-  const sortedJobs = useMemo(() => {
-    const list = [...filteredJobs];
-    if (sortBy === 'recent') {
-      list.sort((a, b) => new Date(b.postedDate).getTime() - new Date(a.postedDate).getTime());
-    }
-    // 'relevance' keeps default search ranking
-    return list;
-  }, [filteredJobs, sortBy]);
+  useEffect(() => {
+    const requestId = ++latestRequest.current;
+    setPageError(null);
+    fetchJobsPage({ filters: queryFilters, sort: sortBy, page: currentPage, pageSize: ITEMS_PER_PAGE })
+      .then((result) => {
+        if (requestId !== latestRequest.current) return;
+        setPaginatedJobs(result.jobs);
+        setTotalCount(result.total);
+        setHasLoaded(true);
+      })
+      .catch((err) => {
+        if (requestId !== latestRequest.current) return;
+        setPageError(err instanceof Error ? err.message : 'Failed to load jobs.');
+      });
+  }, [queryFilters, sortBy, currentPage, reloadToken]);
 
   // Pagination calculation
-  const totalPages = Math.ceil(sortedJobs.length / ITEMS_PER_PAGE) || 1;
-  const paginatedJobs = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return sortedJobs.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [sortedJobs, currentPage]);
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE) || 1;
 
-  // Windowed page list: first page, last page, current page ± 1, with
+  // If the result set shrank (e.g. jobs were deactivated) past the current
+  // page, move back to the last page that exists.
+  useEffect(() => {
+    if (hasLoaded && currentPage > totalPages) setCurrentPage(totalPages);
+  }, [hasLoaded, currentPage, totalPages]);
+
+  const loading = !hasLoaded && !pageError;
+  const loadError = pageError || companiesError;
+  const retryLoad = () => {
+    if (pageError) setReloadToken((t) => t + 1);
+    if (companiesError) retryCompanies();
+  };
+
+  // Windowed page list: first page, last page, current page Â± 1, with
   // '...' gaps elsewhere, so the pagination bar stays a fixed, wrappable width
   // regardless of how many total pages exist.
   const paginationItems = useMemo(() => {
@@ -198,7 +193,7 @@ export const JobsPage: React.FC = () => {
                 Tech Job Listings
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Showing {sortedJobs.length} active opportunities across top tech engineering teams
+                Showing {totalCount} active opportunities across top tech engineering teams
               </p>
             </div>
 
@@ -246,7 +241,7 @@ export const JobsPage: React.FC = () => {
               onFilterChange={setFilters}
               availableLocations={availableLocations}
               availableCompanies={availableCompanies}
-              totalResultsCount={sortedJobs.length}
+              totalResultsCount={totalCount}
               onReset={handleResetFilters}
             />
           </div>
@@ -256,7 +251,7 @@ export const JobsPage: React.FC = () => {
             {/* Sort Dropdown & Quick Summary */}
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
               <div className="text-xs text-slate-600 dark:text-slate-400">
-                Found <span className="font-semibold text-slate-900 dark:text-white">{sortedJobs.length}</span> positions
+                Found <span className="font-semibold text-slate-900 dark:text-white">{totalCount}</span> positions
                 {filters.company && <span> at <strong className="text-indigo-600 dark:text-indigo-400">{filters.company}</strong></span>}
                 {filters.location && <span> in <strong>{filters.location}</strong></span>}
               </div>
@@ -401,7 +396,7 @@ export const JobsPage: React.FC = () => {
                 onFilterChange={setFilters}
                 availableLocations={availableLocations}
                 availableCompanies={availableCompanies}
-                totalResultsCount={sortedJobs.length}
+                totalResultsCount={totalCount}
                 onReset={handleResetFilters}
                 className="border-0 shadow-none p-0"
               />
@@ -413,7 +408,7 @@ export const JobsPage: React.FC = () => {
                 onClick={() => setMobileFiltersOpen(false)}
                 className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-semibold"
               >
-                Apply Filters ({sortedJobs.length} results)
+                Apply Filters ({totalCount} results)
               </button>
             </div>
           </div>

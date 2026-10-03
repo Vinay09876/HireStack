@@ -70,9 +70,12 @@ supabase/
 ### Scraper (in `scripts/scraper/`)
 
 - `node index.mjs` — run a full scrape of every company in `companies.json` and upsert results to Supabase
+- `node dry-run.mjs [--out report.json]` — read-only preview of a full scrape: fetches every company and reports, per company, the jobs that would be upserted/reactivated/deactivated and any issues that would fail a real run. It never writes to Supabase (non-GET requests are blocked); set `SUPABASE_ANON_KEY` to also have RLS reject writes at the database. Exits non-zero if a real run would fail.
 - `node send-alerts.mjs` — run the job-alert matching + email digest job once (needs `RESEND_API_KEY` set)
 
-Both also run automatically on a schedule via GitHub Actions once the required repository secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `SITE_URL`) are configured.
+The scraper runs automatically on a schedule via GitHub Actions once the required repository secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) are configured. The job-alerts workflow is manual-only (`workflow_dispatch`) while Job Alerts is disabled; it also needs `RESEND_API_KEY` and `SITE_URL`.
+
+The scraper exits non-zero (failing the Action) on any database error, crash, or company fetch failure — except fetch failures for companies marked `"knownFailing": true` in `companies.json`, which are logged but tolerated. Apply the SQL files in `supabase/migrations/` in numeric order before deploying changes that depend on them.
 
 ## Known limitations
 

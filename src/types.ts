@@ -16,7 +16,7 @@ export interface Job {
   qualifications?: string[];
   salaryRange?: string | null;
   applicationUrl: string;
-  postedDate: string; // ISO string or YYYY-MM-DD
+  postedDate: string | null; // YYYY-MM-DD; null when the source doesn't provide one
   isActive: boolean;
   department?: string;
   isRemote?: boolean;
